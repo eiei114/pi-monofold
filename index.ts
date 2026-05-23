@@ -1,4 +1,4 @@
-﻿import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+﻿import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -50,7 +50,13 @@ type LoadedConfig = {
 type TargetInput = {
   targetTags?: string[];
   workspaceName?: string;
+  workspaceIndex?: number;
   requireCapabilities?: CapabilityTag[];
+};
+
+type ParsedCommandArgs = {
+  positional: string[];
+  flags: Record<string, string | boolean>;
 };
 
 type CommandResult = {
@@ -263,12 +269,169 @@ async function loadConfig(cwd: string): Promise<LoadedConfig> {
 }
 
 function matchesTarget(workspace: ResolvedWorkspace, target: TargetInput): boolean {
+  if (target.workspaceIndex !== undefined && workspace.index !== target.workspaceIndex) return false;
   if (target.workspaceName && workspace.name !== target.workspaceName) return false;
   if (target.targetTags?.length && !target.targetTags.every((tag) => workspace.tags.includes(tag))) return false;
   if (target.requireCapabilities?.length) {
     if (!target.requireCapabilities.every((cap) => workspace.capabilities.includes(cap))) return false;
   }
   return true;
+}
+
+function splitCommandArgs(input: string): string[] {
+  const tokens: string[] = [];
+  const pattern = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(input))) {
+    const token = match[1] ?? match[2] ?? match[3] ?? "";
+    tokens.push(token.replace(/\\(["\\])/g, "$1"));
+  }
+  return tokens;
+}
+
+function parseCommandArgs(input: string): ParsedCommandArgs {
+  const positional: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+  const tokens = splitCommandArgs(input);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token.startsWith("--") || token === "--") {
+      positional.push(token);
+      continue;
+    }
+    const raw = token.slice(2);
+    const equalsIndex = raw.indexOf("=");
+    if (equalsIndex >= 0) {
+      flags[raw.slice(0, equalsIndex)] = raw.slice(equalsIndex + 1);
+      continue;
+    }
+    const next = tokens[index + 1];
+    if (next && !next.startsWith("--")) {
+      flags[raw] = next;
+      index += 1;
+    } else {
+      flags[raw] = true;
+    }
+  }
+  return { positional, flags };
+}
+
+function stringFlag(flags: Record<string, string | boolean>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = flags[name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function commandTarget(flags: Record<string, string | boolean>, requireCapabilities?: CapabilityTag[]): TargetInput {
+  const workspace = stringFlag(flags, "workspace", "w");
+  const tags = stringFlag(flags, "tags", "tag")
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const workspaceIndex = workspace?.startsWith("#") ? Number.parseInt(workspace.slice(1), 10) : undefined;
+  return {
+    ...(workspace && workspaceIndex === undefined ? { workspaceName: workspace } : {}),
+    ...(workspaceIndex !== undefined && Number.isFinite(workspaceIndex) ? { workspaceIndex } : {}),
+    ...(tags?.length ? { targetTags: tags } : {}),
+    requireCapabilities,
+  };
+}
+
+function metadataFlag(flags: Record<string, string | boolean>): Record<string, string> {
+  const raw = stringFlag(flags, "meta", "metadata");
+  if (!raw) return {};
+  return Object.fromEntries(
+    raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const equalsIndex = item.indexOf("=");
+        if (equalsIndex < 0) return [item, ""];
+        return [item.slice(0, equalsIndex).trim(), item.slice(equalsIndex + 1).trim()];
+      })
+      .filter(([key]) => key),
+  );
+}
+
+function commaListFlag(flags: Record<string, string | boolean>, ...names: string[]): string[] {
+  const raw = stringFlag(flags, ...names);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function routesFlag(flags: Record<string, string | boolean>): WorkspaceConfig["routes"] | undefined {
+  const raw = stringFlag(flags, "routes", "route");
+  if (!raw) return undefined;
+  if (!raw.includes("=")) return { default: raw };
+  const routes: Partial<Record<RouteType, string>> = {};
+  for (const item of raw.split(",").map((part) => part.trim()).filter(Boolean)) {
+    const equalsIndex = item.indexOf("=");
+    if (equalsIndex < 0) throw new Error(`Route entry must be routeType=path: ${item}`);
+    const routeType = item.slice(0, equalsIndex).trim() as RouteType;
+    const routePath = item.slice(equalsIndex + 1).trim();
+    if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown route type: ${routeType}`);
+    if (!routePath) throw new Error(`Route path is empty for ${routeType}`);
+    routes[routeType] = routePath;
+  }
+  return routes;
+}
+
+function buildWorkspaceFromAddArgs(args: string): WorkspaceConfig {
+  const parsed = parseCommandArgs(args);
+  const workspacePath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional[0];
+  if (!workspacePath) throw new Error("workspace path is required");
+  const capabilities = commaListFlag(parsed.flags, "capabilities", "caps", "cap");
+  if (capabilities.length === 0) throw new Error("--capabilities is required");
+  const workspaceBlock: WorkspaceConfig = {
+    ...(stringFlag(parsed.flags, "name", "n") ? { name: stringFlag(parsed.flags, "name", "n") } : {}),
+    path: workspacePath,
+    tags: commaListFlag(parsed.flags, "tags", "tag"),
+    capabilities: asCapabilityArray(capabilities),
+    contextFiles: commaListFlag(parsed.flags, "context", "contexts", "contextFiles"),
+    ...(routesFlag(parsed.flags) ? { routes: routesFlag(parsed.flags) } : {}),
+  };
+  if (workspaceBlock.tags.length === 0) throw new Error("--tags is required");
+  if (workspaceBlock.contextFiles?.length === 0) delete workspaceBlock.contextFiles;
+  if (workspaceBlock.capabilities.includes("writeDocs") && !workspaceBlock.routes) {
+    throw new Error("workspaces with writeDocs require --route or --routes");
+  }
+  return workspaceBlock;
+}
+
+async function addWorkspaceToConfig(configPath: string, workspaceBlock: WorkspaceConfig): Promise<void> {
+  const exists = await pathExists(configPath);
+  const parsed = exists ? (YAML.parse(await readFile(configPath, "utf8"), { uniqueKeys: true }) as unknown) : { version: 1, workspaces: [] };
+  if (!isRecord(parsed)) throw new Error("monofold config must be a YAML object");
+  if (parsed.version === undefined) parsed.version = 1;
+  if (parsed.version !== 1) throw new Error("monofold config requires version: 1");
+  const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
+  parsed.workspaces = workspaces;
+  if (workspaces.some((item: unknown) => isRecord(item) && item.path === workspaceBlock.path)) {
+    throw new Error(`workspace path already exists: ${workspaceBlock.path}`);
+  }
+  workspaces.push(workspaceBlock);
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, YAML.stringify(parsed).trimEnd() + "\n", "utf8");
+}
+
+function sendCommandOutput(pi: ExtensionAPI, title: string, text: string, details?: Record<string, unknown>) {
+  pi.sendMessage({
+    customType: "monofold-output",
+    content: `## ${title}\n\n${text}`,
+    display: true,
+    details: details ?? {},
+  });
+}
+
+function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usage: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  sendCommandOutput(pi, command, `Error: ${message}\n\nUsage:\n${usage}`, { error: message });
 }
 
 async function resolveWorkspace(ctx: ExtensionContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
@@ -605,9 +768,213 @@ ${manifest}
     },
   });
 
-  pi.registerCommand("monofold:init", {
-    description: "Create or update .pi/monofold.yml with an interactive wizard",
-    handler: async (_args, ctx) => {
+  const listCommand = async (_args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const manifest = await buildManifest(loaded);
+      sendCommandOutput(pi, "monofold:list", manifest, { workspaces: loaded.workspaces });
+    } catch (error) {
+      sendCommandError(pi, "monofold:list", error, "/monofold:list");
+    }
+  };
+
+  const readUsage = [
+    "/monofold:tree [path] [--workspace \"Name\"|--workspace #0] [--depth 2]",
+    "/monofold:read file <path> [--workspace \"Name\"|--workspace #0]",
+    "/monofold:search <query> [--workspace \"Name\"|--workspace #0]",
+    "Aliases: /monofold_read tree|file|search ...",
+  ].join("\n");
+
+  const readCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const parsed = parseCommandArgs(args);
+      const mode = parsed.positional[0] ?? "tree";
+      const loaded = await loadConfig(ctx.cwd);
+      const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, ["read"]));
+      if (!workspace.capabilities.includes("read")) throw new Error(`Workspace lacks read capability: ${formatWorkspaceLabel(workspace)}`);
+
+      if (mode === "file" || mode === "read") {
+        const inputPath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional.slice(1).join(" ");
+        if (!inputPath) throw new Error("file mode requires path");
+        const filePath = relativePath(workspace, inputPath);
+        const text = await readFile(filePath, "utf8");
+        sendCommandOutput(pi, `monofold:read ${formatWorkspaceLabel(workspace)}:${inputPath}`, text, { workspace, path: inputPath });
+        return;
+      }
+
+      if (mode === "tree" || mode === "ls") {
+        const inputPath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional.slice(1).join(" ");
+        const depth = Number.parseInt(stringFlag(parsed.flags, "depth", "d") ?? "1", 10);
+        const root = inputPath ? relativePath(workspace, inputPath) : workspace.resolvedPath;
+        const lines = await shallowTree(root, Math.max(0, Math.min(5, Number.isFinite(depth) ? depth : 1)));
+        sendCommandOutput(pi, `monofold:tree ${formatWorkspaceLabel(workspace)}:${inputPath || "."}`, lines.join("\n"), {
+          workspace,
+          path: inputPath || ".",
+        });
+        return;
+      }
+
+      if (mode === "search" || mode === "grep") {
+        const query = stringFlag(parsed.flags, "query", "q") ?? parsed.positional.slice(1).join(" ");
+        if (!query) throw new Error("search mode requires query");
+        const result = await runCommand("rg", ["--line-number", "--hidden", "--glob", "!.git/**", query, "."], {
+          cwd: workspace.resolvedPath,
+          timeout: 10000,
+          allowExitCodes: [0, 1],
+        });
+        const output = result.stdout.trim() || result.stderr.trim() || "No matches";
+        sendCommandOutput(pi, `monofold:search ${formatWorkspaceLabel(workspace)}:${query}`, output, { workspace, query });
+        return;
+      }
+
+      throw new Error(`Unknown read mode: ${mode}`);
+    } catch (error) {
+      sendCommandError(pi, "monofold:read", error, readUsage);
+    }
+  };
+
+  const writeUsage = [
+    "/monofold:write --route progress --title \"Title\" --body \"Markdown body\" [--workspace \"Name\"|--workspace #0]",
+    "Optional: --filename file.md --meta key=value,other=value",
+    "Alias: /monofold_write ...",
+  ].join("\n");
+
+  const writeCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const parsed = parseCommandArgs(args);
+      const routeType = (stringFlag(parsed.flags, "route", "r") ?? parsed.positional[0] ?? "default") as RouteType;
+      if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown routeType: ${routeType}`);
+      const title = stringFlag(parsed.flags, "title", "t");
+      const body = stringFlag(parsed.flags, "body", "b");
+      if (!title) throw new Error("--title is required");
+      if (!body) throw new Error("--body is required");
+
+      const loaded = await loadConfig(ctx.cwd);
+      const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, ["writeDocs"]));
+      const route = workspace.normalizedRoutes[routeType] ?? workspace.normalizedRoutes.default;
+      if (!route) throw new Error(`Workspace has no route for ${routeType} and no default route`);
+      const now = new Date();
+      const date = now.toISOString().slice(0, 10);
+      const vars = {
+        date,
+        datetime: now.toISOString(),
+        title,
+        slug: slugify(title),
+        routeType,
+        workspaceName: workspace.name ?? "",
+        workspaceTags: workspace.tags.join(","),
+      };
+      const defaultTemplate = loaded.raw.defaults?.filenameTemplate ?? "{{date}}-{{slug}}.md";
+      const filename = stringFlag(parsed.flags, "filename", "file", "f") ?? renderTemplate(route.filenameTemplate ?? defaultTemplate, vars);
+      assertWorkspaceInternalRelative("filename", filename);
+      const dir = relativePath(workspace, route.path);
+      const outputPath = path.join(dir, filename);
+      const metadata = renderMetadata(
+        { ...(loaded.raw.defaults?.metadata ?? {}), ...(route.metadata ?? {}), ...metadataFlag(parsed.flags) },
+        vars,
+      ) as Record<string, unknown>;
+      const text = `${frontmatter(metadata)}# ${title}\n\n${body.trim()}\n`;
+      await mkdir(path.dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, text, "utf8");
+      const rel = normalizeSlashes(path.relative(workspace.resolvedPath, outputPath));
+      sendCommandOutput(pi, "monofold:write", `Wrote ${formatWorkspaceLabel(workspace)}:${rel}`, { workspace, path: rel });
+    } catch (error) {
+      sendCommandError(pi, "monofold:write", error, writeUsage);
+    }
+  };
+
+  const gitUsage = "/monofold:git status|commit|push [--workspace \"Name\"|--workspace #0] [--message \"Commit message\"]\nAlias: /monofold_git ...";
+
+  const gitCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const parsed = parseCommandArgs(args);
+      const action = parsed.positional[0] ?? "status";
+      const required: CapabilityTag[] = action === "push" ? ["gitPush"] : action === "commit" ? ["gitCommit"] : [];
+      const loaded = await loadConfig(ctx.cwd);
+      const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, required));
+      if (!(await pathExists(path.join(workspace.resolvedPath, ".git")))) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
+
+      if (action === "status") {
+        const result = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short", "--branch"], { timeout: 10000 });
+        sendCommandOutput(pi, `monofold:git status ${formatWorkspaceLabel(workspace)}`, result.stdout || "clean", { workspace });
+        return;
+      }
+
+      if (action === "commit") {
+        const parsedMessage = stringFlag(parsed.flags, "message", "m") ?? parsed.positional.slice(1).join(" ");
+        const message = parsedMessage || `Update ${workspace.name ?? (workspace.tags.join("-") || "workspace")}`;
+        const status = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short"], { timeout: 10000 });
+        const diffstat = await runCommand("git", ["-C", workspace.resolvedPath, "diff", "--stat"], { timeout: 10000 });
+        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus:\n${status.stdout || "clean"}\n\nDiffstat:\n${diffstat.stdout || "none"}\n\nCommit message:\n${message}\n\nStage all and commit?`);
+        if (!ok) {
+          sendCommandOutput(pi, "monofold:git commit", "Commit cancelled", { cancelled: true });
+          return;
+        }
+        await runCommand("git", ["-C", workspace.resolvedPath, "add", "-A"], { timeout: 10000 });
+        const commit = await runCommand("git", ["-C", workspace.resolvedPath, "commit", "-m", message], { timeout: 30000 });
+        sendCommandOutput(pi, `monofold:git commit ${formatWorkspaceLabel(workspace)}`, commit.stdout || commit.stderr, { workspace, message });
+        return;
+      }
+
+      if (action === "push") {
+        const branch = await runCommand("git", ["-C", workspace.resolvedPath, "branch", "--show-current"], { timeout: 10000 });
+        const remote = await runCommand("git", ["-C", workspace.resolvedPath, "remote", "-v"], { timeout: 10000 });
+        const log = await runCommand("git", ["-C", workspace.resolvedPath, "log", "--oneline", "@{u}..HEAD"], {
+          timeout: 10000,
+          allowExitCodes: [0, 128],
+        });
+        const ok = await confirm(ctx, "Confirmed Push", `${formatWorkspaceLabel(workspace)}\n\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\n\nCommits to push:\n${log.stdout || "none/unknown upstream"}\n\nPush now?`);
+        if (!ok) {
+          sendCommandOutput(pi, "monofold:git push", "Push cancelled", { cancelled: true });
+          return;
+        }
+        const push = await runCommand("git", ["-C", workspace.resolvedPath, "push"], { timeout: 60000 });
+        sendCommandOutput(pi, `monofold:git push ${formatWorkspaceLabel(workspace)}`, push.stdout || push.stderr, { workspace });
+        return;
+      }
+
+      throw new Error(`Unknown git action: ${action}`);
+    } catch (error) {
+      sendCommandError(pi, "monofold:git", error, gitUsage);
+    }
+  };
+
+  const addUsage = [
+    "/monofold:add <path> --name \"Name\" --tags tag1,tag2 --capabilities read,editCode,runCommands,gitCommit",
+    "Optional: --context README.md,AGENTS.md",
+    "Docs workspace: --capabilities read,writeDocs,gitCommit --route Notes",
+    "Multi-route docs: --routes default=Notes,progress=Progress,research=Research",
+    "Alias: /monofold_add ...",
+  ].join("\n");
+
+  const addCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const workspaceBlock = buildWorkspaceFromAddArgs(args);
+      const configPath = path.join(ctx.cwd, CONFIG_RELATIVE_PATH);
+      await addWorkspaceToConfig(configPath, workspaceBlock);
+      const loaded = await loadConfig(ctx.cwd);
+      sendCommandOutput(pi, "monofold:add", `Added workspace:\n${YAML.stringify(workspaceBlock).trim()}\n\n${await buildManifest(loaded)}`, {
+        workspace: workspaceBlock,
+      });
+    } catch (error) {
+      sendCommandError(pi, "monofold:add", error, addUsage);
+    }
+  };
+
+  pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces", handler: listCommand });
+  pi.registerCommand("monofold_list", { description: "Alias for /monofold:list", handler: listCommand });
+  pi.registerCommand("monofold:tree", { description: "Show a tree for a configured workspace", handler: readCommand });
+  pi.registerCommand("monofold:read", { description: "Read, tree, or search a configured workspace", handler: readCommand });
+  pi.registerCommand("monofold_read", { description: "Alias for /monofold:read", handler: readCommand });
+  pi.registerCommand("monofold:search", { description: "Search a configured workspace", handler: (args, ctx) => readCommand(`search ${args}`, ctx) });
+  pi.registerCommand("monofold:write", { description: "Write a routed Markdown document", handler: writeCommand });
+  pi.registerCommand("monofold_write", { description: "Alias for /monofold:write", handler: writeCommand });
+  pi.registerCommand("monofold:git", { description: "Run guarded workspace git status, commit, or push", handler: gitCommand });
+  pi.registerCommand("monofold_git", { description: "Alias for /monofold:git", handler: gitCommand });
+  pi.registerCommand("monofold:add", { description: "Add a workspace to .pi/monofold.yml", handler: addCommand });
+  pi.registerCommand("monofold_add", { description: "Alias for /monofold:add", handler: addCommand });
+
+  const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("monofold:init requires interactive UI", "error");
         return;
@@ -644,7 +1011,15 @@ ${manifest}
       await mkdir(path.dirname(configPath), { recursive: true });
       await writeFile(configPath, next, "utf8");
       ctx.ui.notify(`Updated ${CONFIG_RELATIVE_PATH}`, "info");
-    },
+  };
+
+  pi.registerCommand("monofold:init", {
+    description: "Create or update .pi/monofold.yml with an interactive wizard",
+    handler: initCommand,
+  });
+  pi.registerCommand("monofold_init", {
+    description: "Alias for /monofold:init",
+    handler: initCommand,
   });
 
   pi.registerTool({

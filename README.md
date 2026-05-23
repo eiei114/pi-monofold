@@ -67,7 +67,8 @@ pi -e npm:pi-monofold
 ### Local development
 
 ```powershell
-cd C:\Users\Keisu\Projects\OSS\pi-monofold
+git clone https://github.com/eiei114/pi-monofold.git
+cd pi-monofold
 npm install
 npm run typecheck
 ```
@@ -75,7 +76,7 @@ npm run typecheck
 Try the local checkout without installing:
 
 ```powershell
-pi -e C:\Users\Keisu\Projects\OSS\pi-monofold
+pi -e .
 ```
 
 ## Config

@@ -1,37 +1,44 @@
-﻿{
-    "scripts":  {
-                    "typecheck":  "tsc --noEmit"
-                },
-    "peerDependencies":  {
-                             "typebox":  "*",
-                             "@earendil-works/pi-coding-agent":  "*",
-                             "@earendil-works/pi-ai":  "*"
-                         },
-    "description":  "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
-    "type":  "module",
-    "version":  "0.1.0",
-    "pi":  {
-               "extensions":  [
-                                  "./index.ts"
-                              ]
-           },
-    "name":  "pi-monofold",
-    "private":  true,
-    "devDependencies":  {
-                            "typescript":  "^6.0.3",
-                            "typebox":  "^1.1.38",
-                            "@types/node":  "^25.9.1",
-                            "@earendil-works/pi-coding-agent":  "^0.75.4",
-                            "@earendil-works/pi-ai":  "^0.75.4"
-                        },
-    "dependencies":  {
-                         "yaml":  "^2.8.1"
-                     },
-    "keywords":  [
-                     "pi-package",
-                     "pi-extension",
-                     "ai-coding",
-                     "virtual-monorepo",
-                     "multi-repo"
-                 ]
+{
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "typebox": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "description": "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
+  "type": "module",
+  "version": "0.0.1",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "name": "pi-monofold",
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "typebox": "^1.1.38",
+    "@types/node": "^25.9.1",
+    "@earendil-works/pi-coding-agent": "^0.75.4",
+    "@earendil-works/pi-ai": "^0.75.4"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "ai-coding",
+    "virtual-monorepo",
+    "multi-repo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eiei114/pi-monofold.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eiei114/pi-monofold/issues"
+  },
+  "homepage": "https://github.com/eiei114/pi-monofold#readme"
 }

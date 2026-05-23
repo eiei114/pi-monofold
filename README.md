@@ -8,7 +8,63 @@ It keeps repositories physically separate, while giving Pi a lightweight manifes
 
 AI coding agents work best when documentation, rules, product context, and implementation code are visible as one connected system. Physical monorepos are not always practical. Pi Monofold gives Pi a logical monorepo boundary without forcing repository migration.
 
-## Install for local development
+## Install
+
+Pi Monofold is a Pi package. Install it with Pi's package installer from git or npm.
+
+> Security: Pi packages run with full system access. Review packages before installing third-party code.
+
+### From git
+
+```powershell
+pi install git:github.com/eiei114/pi-monofold
+```
+
+Install into the current project settings instead of user settings:
+
+```powershell
+pi install -l git:github.com/eiei114/pi-monofold
+```
+
+Pin a version/ref:
+
+```powershell
+pi install git:github.com/eiei114/pi-monofold@v0.1.0
+```
+
+Try without installing:
+
+```powershell
+pi -e git:github.com/eiei114/pi-monofold
+```
+
+### From npm
+
+After the package is published to npm:
+
+```powershell
+pi install npm:pi-monofold
+```
+
+Install into the current project settings instead of user settings:
+
+```powershell
+pi install -l npm:pi-monofold
+```
+
+Pin a version:
+
+```powershell
+pi install npm:pi-monofold@0.1.0
+```
+
+Try without installing:
+
+```powershell
+pi -e npm:pi-monofold
+```
+
+### Local development
 
 ```powershell
 cd C:\Users\Keisu\Projects\OSS\pi-monofold
@@ -16,7 +72,7 @@ npm install
 npm run typecheck
 ```
 
-Try as a Pi extension:
+Try the local checkout without installing:
 
 ```powershell
 pi -e C:\Users\Keisu\Projects\OSS\pi-monofold

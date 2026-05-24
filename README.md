@@ -84,7 +84,7 @@ pi -e .
 Place config in the control repository:
 
 ```text
-<control-repo>/.pi/monofold.yml
+<control-repo>/.pi/monofold.yaml
 ```
 
 Example:
@@ -111,6 +111,14 @@ workspaces:
         filenameTemplate: "prd-{{slug}}.md"
         metadata:
           type: prd
+    projects:
+      - name: "Launch plan"
+        path: "Projects/Launch"
+        tags: [project, launch]
+        contextFiles: [CONTEXT.md]
+        routes:
+          default: "."
+          progress: "Progress"
 
   - name: "Application"
     path: "../app"
@@ -130,23 +138,41 @@ workspaces:
 ## Commands
 
 - `/monofold:list` or `/monofold_list`: show manifest and git status summary.
-- `/monofold:add <path> --name "Name" --tags tag1,tag2 --capabilities read,editCode,runCommands,gitCommit`: add a workspace to `.pi/monofold.yml`.
-- `/monofold:read file <path> --workspace #0`: read a file from a workspace.
-- `/monofold:tree [path] --workspace #0 --depth 2`: show a workspace tree.
-- `/monofold:search <query> --workspace #0`: search a workspace.
+- `/monofold:add <path> --name "Name" --tags tag1,tag2 --capabilities read,editCode,runCommands,gitCommit`: add a workspace to `.pi/monofold.yaml`.
+- `/monofold:project-add <path> --parent "Name" --tags project,slug`: add a Project Workspace under a parent workspace.
+- `/monofold:update [natural language request]`: migrate legacy config to `.pi/monofold.yaml`, normalize YAML, validate the manifest, and optionally hand a config-change request to the agent.
+- `/monofold:read file <path> --target #0.1`: read a file from a workspace or project target.
+- `/monofold:tree [path] --target #0.1 --depth 2`: show a target tree.
+- `/monofold:search <query> --target #0.1`: search a target.
 - `/monofold:write --route progress --title "Title" --body "Markdown body"`: write routed Markdown.
-- `/monofold:git status|commit|push --workspace #0`: run guarded workspace git.
+- `/monofold:git status|commit|push --target #0.1`: run guarded target git.
 
 Examples:
 
 ```text
 /monofold:add C:/Projects/app --name "Application" --tags development,app --capabilities read,editCode,runCommands,gitCommit --context README.md,AGENTS.md
 /monofold:add ../business --name "Product Docs" --tags business,docs --capabilities read,writeDocs,gitCommit --routes default=Notes,progress=Progress,research=Research
+/monofold:project-add Projects/Launch --parent "Product Docs" --tags project,launch --routes default=.,progress=Progress
+/monofold:update rename the Product Docs workspace to Business Notes and add tag docs
+```
+
+Project Workspaces are listed under `workspaces[].projects`. Their `path` is relative to the parent workspace, `tags` are combined with parent tags, `capabilities` inherit unless explicitly replaced, and missing routes default to `default: "."` when the effective target has `writeDocs`.
+
+## Updating configuration
+
+`.pi/monofold.yaml` is the canonical config file. Legacy `.pi/monofold.yml` is still readable, but `/monofold:update` migrates it to `.pi/monofold.yaml`, writes a timestamped backup such as `.pi/monofold.yml.bak-20260524-153012`, and removes the legacy file after a successful write. If both `.yaml` and `.yml` exist, Pi Monofold stops with a conflict error so you can choose the correct file manually.
+
+`/monofold:update` is a configuration migration command, not a Pi package updater. Use `pi update`, `pi update --extensions`, or `pi install ...@new-ref` for package updates.
+
+After migration, you can provide a natural-language configuration change request. The command hands that request to the Pi agent, which edits `.pi/monofold.yaml` directly and validates the result through the manifest path:
+
+```text
+/monofold:update add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tags project,newapp and progress route Progress
 ```
 
 ## Guard
 
-When `.pi/monofold.yml` exists, Pi Monofold guards standard `read/write/edit/grep/find/bash` calls against workspace capabilities.
+When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards standard `read/write/edit/grep/find/bash` calls against workspace capabilities.
 
 - Unknown path: confirm in UI, block without UI.
 - Docs write: requires `writeDocs`.

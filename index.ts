@@ -1,7 +1,7 @@
 ﻿import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 
@@ -21,6 +21,16 @@ type WorkspaceConfig = {
   capabilities: CapabilityTag[];
   contextFiles?: string[];
   routes?: Partial<Record<RouteType, string | RouteConfig>>;
+  projects?: ProjectConfig[];
+};
+
+type ProjectConfig = {
+  name?: string;
+  path: string;
+  tags: string[];
+  capabilities?: CapabilityTag[];
+  contextFiles?: string[];
+  routes?: Partial<Record<RouteType, string | RouteConfig>>;
 };
 
 type MultiWorkspaceConfig = {
@@ -34,10 +44,17 @@ type MultiWorkspaceConfig = {
 };
 
 type ResolvedWorkspace = WorkspaceConfig & {
+  kind: "workspace" | "project";
+  targetId: string;
   index: number;
+  projectIndex?: number;
+  parent?: ResolvedWorkspace;
+  displayPath: string;
   resolvedPath: string;
+  realPath: string;
   normalizedRoutes: Partial<Record<RouteType, RouteConfig>>;
   effectiveContextFiles: string[];
+  commitScope?: string;
 };
 
 type LoadedConfig = {
@@ -49,6 +66,8 @@ type LoadedConfig = {
 
 type TargetInput = {
   targetTags?: string[];
+  targetName?: string;
+  targetId?: string;
   workspaceName?: string;
   workspaceIndex?: number;
   requireCapabilities?: CapabilityTag[];
@@ -65,7 +84,22 @@ type CommandResult = {
   exitCode: number | string | null | undefined;
 };
 
-const CONFIG_RELATIVE_PATH = path.join(".pi", "monofold.yml");
+type ConfigMigrationPlan = {
+  changed: boolean;
+  sourcePath: string;
+  sourceRelativePath: string;
+  sourceKind: "canonical" | "legacy";
+  targetPath: string;
+  targetRelativePath: string;
+  backupPath?: string;
+  backupRelativePath?: string;
+  normalizedText: string;
+  loaded: LoadedConfig;
+  actions: string[];
+};
+
+const CONFIG_RELATIVE_PATH = path.join(".pi", "monofold.yaml");
+const LEGACY_CONFIG_RELATIVE_PATH = path.join(".pi", "monofold.yml");
 const ROUTE_TYPES: RouteType[] = ["default", "prd", "design", "progress", "issue", "research", "decision"];
 const CAPABILITIES: CapabilityTag[] = ["read", "writeDocs", "editCode", "runCommands", "gitCommit", "gitPush"];
 const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"]);
@@ -95,6 +129,11 @@ const CODE_EXTENSIONS = new Set([
   ".scss",
   ".html",
 ]);
+const ROOT_KEYS = new Set(["version", "defaults", "workspaces"]);
+const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
+const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
+const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
+const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -102,6 +141,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
+}
+
+function assertKnownKeys(label: string, value: Record<string, unknown>, allowed: Set<string>): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new Error(`${label} has unknown key: ${key}`);
+  }
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -113,6 +158,18 @@ function assertWorkspaceInternalRelative(label: string, value: string): void {
   if (path.isAbsolute(value) || normalizeSlashes(value).split("/").includes("..")) {
     throw new Error(`${label} must be a workspace-internal relative path: ${value}`);
   }
+}
+
+function assertProjectPath(label: string, value: string): void {
+  assertWorkspaceInternalRelative(label, value);
+  const normalized = normalizeSlashes(value).replace(/^\.\//, "").replace(/\/$/, "");
+  if (!normalized || normalized === ".") {
+    throw new Error(`${label} must point below the parent workspace, not the parent root`);
+  }
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return [...new Set(items.filter(Boolean))];
 }
 
 function asStringArray(label: string, value: unknown, required = true): string[] {
@@ -133,6 +190,19 @@ function asCapabilityArray(value: unknown): CapabilityTag[] {
   return items as CapabilityTag[];
 }
 
+function asOptionalCapabilityArray(value: unknown): CapabilityTag[] | undefined {
+  if (value === undefined) return undefined;
+  return asCapabilityArray(value);
+}
+
+async function existingRealPath(label: string, targetPath: string): Promise<string> {
+  try {
+    return await realpath(targetPath);
+  } catch {
+    throw new Error(`${label} does not exist: ${targetPath}`);
+  }
+}
+
 function normalizeRoute(routeType: string, value: unknown): RouteConfig {
   if (!ROUTE_TYPES.includes(routeType as RouteType)) {
     throw new Error(`Unknown route type: ${routeType}`);
@@ -144,6 +214,7 @@ function normalizeRoute(routeType: string, value: unknown): RouteConfig {
   if (!isRecord(value) || typeof value.path !== "string") {
     throw new Error(`routes.${routeType} must be a string path or object with path`);
   }
+  assertKnownKeys(`routes.${routeType}`, value, ROUTE_KEYS);
   assertWorkspaceInternalRelative(`routes.${routeType}.path`, value.path);
   if (value.filenameTemplate !== undefined && typeof value.filenameTemplate !== "string") {
     throw new Error(`routes.${routeType}.filenameTemplate must be a string`);
@@ -165,6 +236,19 @@ async function pathExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function resolveConfigFile(cwd: string, allowMissing = false): Promise<{ configPath: string; relativePath: string; kind: "canonical" | "legacy" | "missing" }> {
+  const canonicalPath = path.join(cwd, CONFIG_RELATIVE_PATH);
+  const legacyPath = path.join(cwd, LEGACY_CONFIG_RELATIVE_PATH);
+  const [hasCanonical, hasLegacy] = await Promise.all([pathExists(canonicalPath), pathExists(legacyPath)]);
+  if (hasCanonical && hasLegacy) {
+    throw new Error(`Configuration file conflict: both ${CONFIG_RELATIVE_PATH} and ${LEGACY_CONFIG_RELATIVE_PATH} exist. Remove one before continuing.`);
+  }
+  if (hasCanonical) return { configPath: canonicalPath, relativePath: CONFIG_RELATIVE_PATH, kind: "canonical" };
+  if (hasLegacy) return { configPath: legacyPath, relativePath: LEGACY_CONFIG_RELATIVE_PATH, kind: "legacy" };
+  if (allowMissing) return { configPath: canonicalPath, relativePath: CONFIG_RELATIVE_PATH, kind: "missing" };
+  throw new Error(`No Pi Monofold configuration found. Expected ${CONFIG_RELATIVE_PATH} or legacy ${LEGACY_CONFIG_RELATIVE_PATH}.`);
 }
 
 function runCommand(
@@ -198,22 +282,31 @@ function runCommand(
 }
 
 async function loadConfig(cwd: string): Promise<LoadedConfig> {
-  const configPath = path.join(cwd, CONFIG_RELATIVE_PATH);
+  const { configPath } = await resolveConfigFile(cwd);
   const text = await readFile(configPath, "utf8");
   const parsed = YAML.parse(text, { uniqueKeys: true }) as unknown;
+  return validateConfigObject(cwd, configPath, parsed);
+}
+
+async function validateConfigObject(cwd: string, configPath: string, parsed: unknown): Promise<LoadedConfig> {
   if (!isRecord(parsed)) throw new Error("monofold config must be a YAML object");
+  assertKnownKeys("monofold config", parsed, ROOT_KEYS);
   if (parsed.version !== 1) throw new Error("monofold config requires version: 1");
   if (!Array.isArray(parsed.workspaces) || parsed.workspaces.length === 0) {
     throw new Error("monofold config requires non-empty workspaces array");
   }
 
   const defaults = isRecord(parsed.defaults) ? parsed.defaults : undefined;
+  if (defaults) assertKnownKeys("defaults", defaults, DEFAULT_KEYS);
   const defaultContextFiles = defaults ? asStringArray("defaults.contextFiles", defaults.contextFiles, false) : [];
   const defaultFilenameTemplate = typeof defaults?.filenameTemplate === "string" ? defaults.filenameTemplate : undefined;
   const defaultMetadata = isRecord(defaults?.metadata) ? (defaults.metadata as Record<string, unknown>) : undefined;
 
-  const workspaces = parsed.workspaces.map((item, index): ResolvedWorkspace => {
+  const workspaces: ResolvedWorkspace[] = [];
+  for (let index = 0; index < parsed.workspaces.length; index += 1) {
+    const item = parsed.workspaces[index];
     if (!isRecord(item)) throw new Error(`workspaces[${index}] must be an object`);
+    assertKnownKeys(`workspaces[${index}]`, item, WORKSPACE_KEYS);
     if (item.name !== undefined && typeof item.name !== "string") throw new Error(`workspaces[${index}].name must be string`);
     if (typeof item.path !== "string") throw new Error(`workspaces[${index}].path is required`);
     const tags = asStringArray(`workspaces[${index}].tags`, item.tags);
@@ -226,6 +319,9 @@ async function loadConfig(cwd: string): Promise<LoadedConfig> {
     const routes: Partial<Record<RouteType, string | RouteConfig>> | undefined = isRecord(item.routes)
       ? (item.routes as Partial<Record<RouteType, string | RouteConfig>>)
       : undefined;
+    if (!capabilities.includes("writeDocs") && routes) {
+      throw new Error(`workspaces[${index}] has routes but lacks writeDocs capability`);
+    }
     if (capabilities.includes("writeDocs") && !routes) {
       throw new Error(`workspaces[${index}] has writeDocs but no routes`);
     }
@@ -238,19 +334,87 @@ async function loadConfig(cwd: string): Promise<LoadedConfig> {
     }
 
     const resolvedPath = path.resolve(cwd, item.path);
-    return {
+    const realPath = await existingRealPath(`workspaces[${index}].path`, resolvedPath);
+    const workspace: ResolvedWorkspace = {
+      kind: "workspace",
+      targetId: `#${index}`,
       name: item.name as string | undefined,
       path: item.path,
-      tags,
+      displayPath: item.path,
+      tags: uniqueStrings(tags),
       capabilities,
       contextFiles,
       routes,
       index,
       resolvedPath,
+      realPath,
       normalizedRoutes,
       effectiveContextFiles: [...defaultContextFiles, ...contextFiles],
     };
-  });
+    workspaces.push(workspace);
+
+    const projects = Array.isArray(item.projects) ? item.projects : [];
+    if (item.projects !== undefined && !Array.isArray(item.projects)) {
+      throw new Error(`workspaces[${index}].projects must be an array`);
+    }
+    const seenProjectRealPaths = new Set<string>();
+    for (let projectOffset = 0; projectOffset < projects.length; projectOffset += 1) {
+      const project = projects[projectOffset];
+      const projectIndex = projectOffset + 1;
+      if (!isRecord(project)) throw new Error(`workspaces[${index}].projects[${projectOffset}] must be an object`);
+      assertKnownKeys(`workspaces[${index}].projects[${projectOffset}]`, project, PROJECT_KEYS);
+      if (project.name !== undefined && typeof project.name !== "string") throw new Error(`workspaces[${index}].projects[${projectOffset}].name must be string`);
+      if (typeof project.path !== "string") throw new Error(`workspaces[${index}].projects[${projectOffset}].path is required`);
+      assertProjectPath(`workspaces[${index}].projects[${projectOffset}].path`, project.path);
+      const projectTags = asStringArray(`workspaces[${index}].projects[${projectOffset}].tags`, project.tags);
+      if (projectTags.length === 0) throw new Error(`workspaces[${index}].projects[${projectOffset}].tags is required`);
+      const projectCapabilities = asOptionalCapabilityArray(project.capabilities) ?? capabilities;
+      const projectContextFiles = asStringArray(`workspaces[${index}].projects[${projectOffset}].contextFiles`, project.contextFiles, false);
+      for (const contextFile of projectContextFiles) {
+        assertWorkspaceInternalRelative(`workspaces[${index}].projects[${projectOffset}].contextFiles`, contextFile);
+      }
+      const projectRoutes: Partial<Record<RouteType, string | RouteConfig>> | undefined = isRecord(project.routes)
+        ? (project.routes as Partial<Record<RouteType, string | RouteConfig>>)
+        : undefined;
+      if (!projectCapabilities.includes("writeDocs") && projectRoutes) {
+        throw new Error(`workspaces[${index}].projects[${projectOffset}] has routes but lacks writeDocs capability`);
+      }
+      const projectNormalizedRoutes: Partial<Record<RouteType, RouteConfig>> = {};
+      if (projectRoutes) {
+        for (const [routeType, routeValue] of Object.entries(projectRoutes)) {
+          projectNormalizedRoutes[routeType as RouteType] = normalizeRoute(routeType, routeValue);
+        }
+      } else if (projectCapabilities.includes("writeDocs")) {
+        projectNormalizedRoutes.default = { path: "." };
+      }
+      const projectResolvedPath = path.resolve(resolvedPath, project.path);
+      const projectRealPath = await existingRealPath(`workspaces[${index}].projects[${projectOffset}].path`, projectResolvedPath);
+      if (!isInside(realPath, projectRealPath) || projectRealPath === realPath) {
+        throw new Error(`workspaces[${index}].projects[${projectOffset}].path must stay below parent workspace: ${project.path}`);
+      }
+      if (seenProjectRealPaths.has(projectRealPath)) throw new Error(`Duplicate project path in workspaces[${index}]: ${project.path}`);
+      seenProjectRealPaths.add(projectRealPath);
+      workspaces.push({
+        kind: "project",
+        targetId: `#${index}.${projectIndex}`,
+        name: project.name as string | undefined,
+        path: project.path,
+        displayPath: normalizeSlashes(path.join(item.path, project.path)),
+        tags: uniqueStrings([...tags, ...projectTags]),
+        capabilities: projectCapabilities,
+        contextFiles: projectContextFiles,
+        routes: project.routes as ProjectConfig["routes"],
+        index,
+        projectIndex,
+        parent: workspace,
+        resolvedPath: projectResolvedPath,
+        realPath: projectRealPath,
+        normalizedRoutes: projectNormalizedRoutes,
+        effectiveContextFiles: [...defaultContextFiles, ...contextFiles, ...projectContextFiles],
+        commitScope: normalizeSlashes(path.relative(resolvedPath, projectResolvedPath)),
+      });
+    }
+  }
 
   return {
     configPath,
@@ -262,15 +426,95 @@ async function loadConfig(cwd: string): Promise<LoadedConfig> {
         filenameTemplate: defaultFilenameTemplate,
         metadata: defaultMetadata,
       },
-      workspaces,
+      workspaces: workspaces.filter((workspace) => workspace.kind === "workspace"),
     },
     workspaces,
   };
 }
 
+function timestampSuffix(now = new Date()): string {
+  return now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z").replace("T", "-").replace(/Z$/, "");
+}
+
+function normalizeConfigForMigration(parsed: unknown): Record<string, unknown> {
+  if (!isRecord(parsed)) throw new Error("monofold config must be a YAML object");
+  assertKnownKeys("monofold config", parsed, ROOT_KEYS);
+  const version = parsed.version ?? 1;
+  if (version !== 1) throw new Error("monofold config requires version: 1");
+  const normalized: Record<string, unknown> = { version: 1 };
+  if (parsed.defaults !== undefined) normalized.defaults = parsed.defaults;
+  normalized.workspaces = parsed.workspaces;
+  return normalized;
+}
+
+async function buildConfigMigrationPlan(cwd: string): Promise<ConfigMigrationPlan> {
+  const source = await resolveConfigFile(cwd);
+  if (source.kind === "missing") throw new Error(`No Pi Monofold configuration found. Expected ${CONFIG_RELATIVE_PATH} or legacy ${LEGACY_CONFIG_RELATIVE_PATH}.`);
+
+  const originalText = await readFile(source.configPath, "utf8");
+  const parsed = YAML.parse(originalText, { uniqueKeys: true }) as unknown;
+  const normalized = normalizeConfigForMigration(parsed);
+  const targetPath = path.join(cwd, CONFIG_RELATIVE_PATH);
+  const normalizedText = YAML.stringify(normalized).trimEnd() + "\n";
+  const loaded = await validateConfigObject(cwd, targetPath, normalized);
+  const changed = source.kind !== "canonical" || originalText !== normalizedText;
+  const actions: string[] = [];
+  if (source.kind === "legacy") actions.push(`Move legacy config ${LEGACY_CONFIG_RELATIVE_PATH} to canonical ${CONFIG_RELATIVE_PATH}`);
+  if (originalText !== normalizedText) actions.push("Normalize YAML and ensure version: 1 is explicit");
+  if (source.kind === "legacy") actions.push(`Remove legacy config ${LEGACY_CONFIG_RELATIVE_PATH} after writing ${CONFIG_RELATIVE_PATH}`);
+  if (!changed) actions.push(`Already current: ${CONFIG_RELATIVE_PATH} (version 1)`);
+  const backupPath = changed ? `${source.configPath}.bak-${timestampSuffix()}` : undefined;
+  return {
+    changed,
+    sourcePath: source.configPath,
+    sourceRelativePath: source.relativePath,
+    sourceKind: source.kind,
+    targetPath,
+    targetRelativePath: CONFIG_RELATIVE_PATH,
+    backupPath,
+    backupRelativePath: backupPath ? normalizeSlashes(path.relative(cwd, backupPath)) : undefined,
+    normalizedText,
+    loaded,
+    actions,
+  };
+}
+
+async function applyConfigMigrationPlan(plan: ConfigMigrationPlan): Promise<void> {
+  if (!plan.changed) return;
+  if (!plan.backupPath) throw new Error("Migration backup path is required for changed configuration");
+  await mkdir(path.dirname(plan.targetPath), { recursive: true });
+  await copyFile(plan.sourcePath, plan.backupPath);
+  await writeFile(plan.targetPath, plan.normalizedText, "utf8");
+  if (plan.sourceKind === "legacy") await unlink(plan.sourcePath);
+}
+
+function formatMigrationPlan(plan: ConfigMigrationPlan): string {
+  if (!plan.changed) return `Already current: ${plan.targetRelativePath} (version ${plan.loaded.raw.version})`;
+  return [
+    `Source: ${plan.sourceRelativePath}`,
+    `Target: ${plan.targetRelativePath}`,
+    `Backup: ${plan.backupRelativePath}`,
+    "",
+    "Actions:",
+    ...plan.actions.map((action) => `- ${action}`),
+  ].join("\n");
+}
+
+function buildConfigurationHandoffPrompt(request: string): string {
+  return [
+    "/monofold:update completed. Apply this requested Pi Monofold configuration change to `.pi/monofold.yaml`.",
+    "Edit the canonical config directly when needed, preserve valid YAML, then run `/monofold:list` as manifest validation.",
+    "",
+    "User request:",
+    request.trim(),
+  ].join("\n");
+}
+
 function matchesTarget(workspace: ResolvedWorkspace, target: TargetInput): boolean {
+  if (target.targetId && workspace.targetId !== (target.targetId.startsWith("#") ? target.targetId : `#${target.targetId}`)) return false;
   if (target.workspaceIndex !== undefined && workspace.index !== target.workspaceIndex) return false;
-  if (target.workspaceName && workspace.name !== target.workspaceName) return false;
+  const targetName = target.targetName ?? target.workspaceName;
+  if (targetName && workspace.name !== targetName) return false;
   if (target.targetTags?.length && !target.targetTags.every((tag) => workspace.tags.includes(tag))) return false;
   if (target.requireCapabilities?.length) {
     if (!target.requireCapabilities.every((cap) => workspace.capabilities.includes(cap))) return false;
@@ -325,14 +569,14 @@ function stringFlag(flags: Record<string, string | boolean>, ...names: string[])
 }
 
 function commandTarget(flags: Record<string, string | boolean>, requireCapabilities?: CapabilityTag[]): TargetInput {
-  const workspace = stringFlag(flags, "workspace", "w");
+  const workspace = stringFlag(flags, "target", "workspace", "w");
   const tags = stringFlag(flags, "tags", "tag")
     ?.split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  const workspaceIndex = workspace?.startsWith("#") ? Number.parseInt(workspace.slice(1), 10) : undefined;
+  const workspaceIndex = workspace?.startsWith("#") && !workspace.includes(".") ? Number.parseInt(workspace.slice(1), 10) : undefined;
   return {
-    ...(workspace && workspaceIndex === undefined ? { workspaceName: workspace } : {}),
+    ...(workspace?.startsWith("#") ? { targetId: workspace } : workspace ? { targetName: workspace } : {}),
     ...(workspaceIndex !== undefined && Number.isFinite(workspaceIndex) ? { workspaceIndex } : {}),
     ...(tags?.length ? { targetTags: tags } : {}),
     requireCapabilities,
@@ -420,6 +664,49 @@ async function addWorkspaceToConfig(configPath: string, workspaceBlock: Workspac
   await writeFile(configPath, YAML.stringify(parsed).trimEnd() + "\n", "utf8");
 }
 
+function buildProjectFromAddArgs(args: string): { project: ProjectConfig; parent: TargetInput } {
+  const parsed = parseCommandArgs(args);
+  const projectPath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional[0];
+  if (!projectPath) throw new Error("project path is required");
+  const tags = commaListFlag(parsed.flags, "tags", "tag");
+  if (tags.length === 0) throw new Error("--tags is required");
+  const capabilities = commaListFlag(parsed.flags, "capabilities", "caps", "cap");
+  const parentName = stringFlag(parsed.flags, "parent");
+  const parentTags = commaListFlag(parsed.flags, "parent-tags", "parentTags");
+  if (!parentName && parentTags.length === 0) throw new Error("--parent or --parent-tags is required");
+  const project: ProjectConfig = {
+    ...(stringFlag(parsed.flags, "name", "n") ? { name: stringFlag(parsed.flags, "name", "n") } : {}),
+    path: projectPath,
+    tags,
+    ...(capabilities.length ? { capabilities: asCapabilityArray(capabilities) } : {}),
+    contextFiles: commaListFlag(parsed.flags, "context", "contexts", "contextFiles"),
+    ...(routesFlag(parsed.flags) ? { routes: routesFlag(parsed.flags) } : {}),
+  };
+  if (project.contextFiles?.length === 0) delete project.contextFiles;
+  return {
+    project,
+    parent: {
+      ...(parentName?.startsWith("#") ? { targetId: parentName } : parentName ? { targetName: parentName } : {}),
+      ...(parentTags.length ? { targetTags: parentTags } : {}),
+    },
+  };
+}
+
+async function addProjectToConfig(ctx: ExtensionCommandContext, loaded: LoadedConfig, project: ProjectConfig, parentInput: TargetInput): Promise<void> {
+  const parent = await resolveWorkspace(ctx, { ...loaded, workspaces: loaded.workspaces.filter((workspace) => workspace.kind === "workspace") }, parentInput);
+  assertProjectPath("project.path", project.path);
+  const projectRealPath = await existingRealPath("project.path", path.resolve(parent.resolvedPath, project.path));
+  if (!isInside(parent.realPath, projectRealPath) || projectRealPath === parent.realPath) throw new Error(`project path must stay below parent workspace: ${project.path}`);
+  if (loaded.workspaces.some((workspace) => workspace.parent === parent && workspace.realPath === projectRealPath)) throw new Error(`project path already exists under parent: ${project.path}`);
+  const parsed = YAML.parse(await readFile(loaded.configPath, "utf8"), { uniqueKeys: true }) as Record<string, unknown>;
+  const workspaces = parsed.workspaces as Record<string, unknown>[];
+  const rawParent = workspaces[parent.index];
+  const projects = Array.isArray(rawParent.projects) ? rawParent.projects : [];
+  rawParent.projects = projects;
+  projects.push(project);
+  await writeFile(loaded.configPath, YAML.stringify(parsed).trimEnd() + "\n", "utf8");
+}
+
 function sendCommandOutput(pi: ExtensionAPI, title: string, text: string, details?: Record<string, unknown>) {
   pi.sendMessage({
     customType: "monofold-output",
@@ -434,7 +721,7 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
   sendCommandOutput(pi, command, `Error: ${message}\n\nUsage:\n${usage}`, { error: message });
 }
 
-async function resolveWorkspace(ctx: ExtensionContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
+async function resolveWorkspace(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
   const matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
   if (matches.length === 0) throw new Error(`No workspace matches target: ${JSON.stringify(target)}`);
   if (matches.length === 1) return matches[0];
@@ -449,7 +736,8 @@ async function resolveWorkspace(ctx: ExtensionContext, loaded: LoadedConfig, tar
 
 function formatWorkspaceLabel(workspace: ResolvedWorkspace): string {
   const displayName = workspace.name ? `${workspace.name} ` : "";
-  return `#${workspace.index} ${displayName}[${workspace.tags.join(", ")}] ${workspace.path}`;
+  const parent = workspace.kind === "project" && workspace.parent ? ` parent=${workspace.parent.name ?? workspace.parent.targetId}` : "";
+  return `${workspace.targetId} ${displayName}[${workspace.tags.join(", ")}] ${workspace.displayPath}${parent}`;
 }
 
 function relativePath(workspace: ResolvedWorkspace, inputPath: string): string {
@@ -458,9 +746,16 @@ function relativePath(workspace: ResolvedWorkspace, inputPath: string): string {
 }
 
 async function gitSummary(workspace: ResolvedWorkspace): Promise<{ isGit: boolean; status?: string }> {
-  if (!(await pathExists(path.join(workspace.resolvedPath, ".git")))) return { isGit: false };
-  const result = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short"], { timeout: 5000 });
+  const root = await gitRoot(workspace);
+  if (!root) return { isGit: false };
+  const result = await runCommand("git", ["-C", root, "status", "--short"], { timeout: 5000 });
   return { isGit: true, status: result.stdout.trim() || "clean" };
+}
+
+async function gitRoot(workspace: ResolvedWorkspace): Promise<string | undefined> {
+  if (await pathExists(path.join(workspace.resolvedPath, ".git"))) return workspace.resolvedPath;
+  if (workspace.parent && (await pathExists(path.join(workspace.parent.resolvedPath, ".git")))) return workspace.parent.resolvedPath;
+  return undefined;
 }
 
 async function buildManifest(loaded: LoadedConfig): Promise<string> {
@@ -505,7 +800,7 @@ function slugify(title: string): string {
 }
 
 function renderTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(date|datetime|title|slug|routeType|workspaceName|workspaceTags)\}\}/g, (_, key: string) => vars[key] ?? "");
+  return template.replace(/\{\{(date|datetime|title|slug|routeType|workspaceName|workspaceTags|targetName|targetTags|parentWorkspaceName|projectName)\}\}/g, (_, key: string) => vars[key] ?? "");
 }
 
 function renderMetadata(value: unknown, vars: Record<string, string>): unknown {
@@ -531,7 +826,7 @@ function classifyPath(targetPath: string): "docs" | "code" | "unknown" {
 
 function findWorkspaceForPath(loaded: LoadedConfig, targetPath: string): ResolvedWorkspace | undefined {
   const absolute = path.resolve(loaded.root, targetPath);
-  return loaded.workspaces.find((workspace) => isInside(workspace.resolvedPath, absolute));
+  return [...loaded.workspaces].sort((a, b) => b.resolvedPath.length - a.resolvedPath.length).find((workspace) => isInside(workspace.resolvedPath, absolute));
 }
 
 async function confirm(ctx: ExtensionContext, title: string, body: string): Promise<boolean> {
@@ -630,6 +925,8 @@ ${manifest}
       query: Type.Optional(Type.String({ description: "Search query for mode=search" })),
       depth: Type.Optional(Type.Number({ description: "Tree depth, default 1" })),
       targetTags: Type.Optional(Type.Array(Type.String())),
+      targetName: Type.Optional(Type.String()),
+      targetId: Type.Optional(Type.String()),
       workspaceName: Type.Optional(Type.String()),
       requireCapabilities: Type.Optional(Type.Array(Type.String())),
     }),
@@ -637,6 +934,8 @@ ${manifest}
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
+        targetName: params.targetName,
+        targetId: params.targetId,
         workspaceName: params.workspaceName,
         requireCapabilities: ["read"],
       });
@@ -678,6 +977,8 @@ ${manifest}
       filename: Type.Optional(Type.String()),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
       targetTags: Type.Optional(Type.Array(Type.String())),
+      targetName: Type.Optional(Type.String()),
+      targetId: Type.Optional(Type.String()),
       workspaceName: Type.Optional(Type.String()),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -686,6 +987,8 @@ ${manifest}
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
+        targetName: params.targetName,
+        targetId: params.targetId,
         workspaceName: params.workspaceName,
         requireCapabilities: ["writeDocs"],
       });
@@ -701,6 +1004,10 @@ ${manifest}
         routeType,
         workspaceName: workspace.name ?? "",
         workspaceTags: workspace.tags.join(","),
+        targetName: workspace.name ?? "",
+        targetTags: workspace.tags.join(","),
+        parentWorkspaceName: workspace.parent?.name ?? "",
+        projectName: workspace.kind === "project" ? workspace.name ?? "" : "",
       };
       const defaultTemplate = loaded.raw.defaults?.filenameTemplate ?? "{{date}}-{{slug}}.md";
       const filename = params.filename ?? renderTemplate(route.filenameTemplate ?? defaultTemplate, vars);
@@ -726,6 +1033,8 @@ ${manifest}
       action: Type.String({ description: "status, commit, or push" }),
       message: Type.Optional(Type.String()),
       targetTags: Type.Optional(Type.Array(Type.String())),
+      targetName: Type.Optional(Type.String()),
+      targetId: Type.Optional(Type.String()),
       workspaceName: Type.Optional(Type.String()),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -733,35 +1042,39 @@ ${manifest}
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
+        targetName: params.targetName,
+        targetId: params.targetId,
         workspaceName: params.workspaceName,
         requireCapabilities: required,
       });
-      if (!(await pathExists(path.join(workspace.resolvedPath, ".git")))) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
+      const root = await gitRoot(workspace);
+      if (!root) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
       if (params.action === "status") {
-        const result = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short", "--branch"], { signal, timeout: 10000 });
+        const result = await runCommand("git", ["-C", root, "status", "--short", "--branch"], { signal, timeout: 10000 });
         return { content: [{ type: "text", text: result.stdout || "clean" }], details: { workspace } };
       }
       if (params.action === "commit") {
         const message = params.message ?? `Update ${workspace.name ?? (workspace.tags.join("-") || "workspace")}`;
-        const status = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short"], { signal, timeout: 10000 });
-        const diffstat = await runCommand("git", ["-C", workspace.resolvedPath, "diff", "--stat"], { signal, timeout: 10000 });
-        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus:\n${status.stdout || "clean"}\n\nDiffstat:\n${diffstat.stdout || "none"}\n\nCommit message:\n${message}\n\nStage all and commit?`);
+        const status = await runCommand("git", ["-C", root, "status", "--short"], { signal, timeout: 10000 });
+        const diffstat = await runCommand("git", ["-C", root, "diff", "--stat"], { signal, timeout: 10000 });
+        const scope = workspace.kind === "project" && root !== workspace.resolvedPath ? normalizeSlashes(path.relative(root, workspace.resolvedPath)) : ".";
+        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus (repo full):\n${status.stdout || "clean"}\n\nDiffstat (repo full):\n${diffstat.stdout || "none"}\n\nCommit scope:\n${scope}\n\nCommit message:\n${message}\n\nStage scoped changes and commit?`);
         if (!ok) return { content: [{ type: "text", text: "Commit cancelled" }], details: { cancelled: true } };
-        await runCommand("git", ["-C", workspace.resolvedPath, "add", "-A"], { signal, timeout: 10000 });
-        const commit = await runCommand("git", ["-C", workspace.resolvedPath, "commit", "-m", message], { signal, timeout: 30000 });
+        await runCommand("git", ["-C", root, "add", "-A", "--", scope], { signal, timeout: 10000 });
+        const commit = await runCommand("git", ["-C", root, "commit", "-m", message], { signal, timeout: 30000 });
         return { content: [{ type: "text", text: commit.stdout || commit.stderr }], details: { workspace, message } };
       }
       if (params.action === "push") {
-        const branch = await runCommand("git", ["-C", workspace.resolvedPath, "branch", "--show-current"], { signal, timeout: 10000 });
-        const remote = await runCommand("git", ["-C", workspace.resolvedPath, "remote", "-v"], { signal, timeout: 10000 });
-        const log = await runCommand("git", ["-C", workspace.resolvedPath, "log", "--oneline", "@{u}..HEAD"], {
+        const branch = await runCommand("git", ["-C", root, "branch", "--show-current"], { signal, timeout: 10000 });
+        const remote = await runCommand("git", ["-C", root, "remote", "-v"], { signal, timeout: 10000 });
+        const log = await runCommand("git", ["-C", root, "log", "--oneline", "@{u}..HEAD"], {
           signal,
           timeout: 10000,
           allowExitCodes: [0, 128],
         });
-        const ok = await confirm(ctx, "Confirmed Push", `${formatWorkspaceLabel(workspace)}\n\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\n\nCommits to push:\n${log.stdout || "none/unknown upstream"}\n\nPush now?`);
+        const ok = await confirm(ctx, "Confirmed Push", `${formatWorkspaceLabel(workspace)}\n\nPush is repository/branch scoped.\n\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\n\nCommits to push:\n${log.stdout || "none/unknown upstream"}\n\nPush now?`);
         if (!ok) return { content: [{ type: "text", text: "Push cancelled" }], details: { cancelled: true } };
-        const push = await runCommand("git", ["-C", workspace.resolvedPath, "push"], { signal, timeout: 60000 });
+        const push = await runCommand("git", ["-C", root, "push"], { signal, timeout: 60000 });
         return { content: [{ type: "text", text: push.stdout || push.stderr }], details: { workspace } };
       }
       throw new Error(`Unknown monofold_git action: ${params.action}`);
@@ -863,6 +1176,10 @@ ${manifest}
         routeType,
         workspaceName: workspace.name ?? "",
         workspaceTags: workspace.tags.join(","),
+        targetName: workspace.name ?? "",
+        targetTags: workspace.tags.join(","),
+        parentWorkspaceName: workspace.parent?.name ?? "",
+        projectName: workspace.kind === "project" ? workspace.name ?? "" : "",
       };
       const defaultTemplate = loaded.raw.defaults?.filenameTemplate ?? "{{date}}-{{slug}}.md";
       const filename = stringFlag(parsed.flags, "filename", "file", "f") ?? renderTemplate(route.filenameTemplate ?? defaultTemplate, vars);
@@ -892,10 +1209,11 @@ ${manifest}
       const required: CapabilityTag[] = action === "push" ? ["gitPush"] : action === "commit" ? ["gitCommit"] : [];
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, required));
-      if (!(await pathExists(path.join(workspace.resolvedPath, ".git")))) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
+      const root = await gitRoot(workspace);
+      if (!root) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
 
       if (action === "status") {
-        const result = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short", "--branch"], { timeout: 10000 });
+        const result = await runCommand("git", ["-C", root, "status", "--short", "--branch"], { timeout: 10000 });
         sendCommandOutput(pi, `monofold:git status ${formatWorkspaceLabel(workspace)}`, result.stdout || "clean", { workspace });
         return;
       }
@@ -903,32 +1221,33 @@ ${manifest}
       if (action === "commit") {
         const parsedMessage = stringFlag(parsed.flags, "message", "m") ?? parsed.positional.slice(1).join(" ");
         const message = parsedMessage || `Update ${workspace.name ?? (workspace.tags.join("-") || "workspace")}`;
-        const status = await runCommand("git", ["-C", workspace.resolvedPath, "status", "--short"], { timeout: 10000 });
-        const diffstat = await runCommand("git", ["-C", workspace.resolvedPath, "diff", "--stat"], { timeout: 10000 });
-        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus:\n${status.stdout || "clean"}\n\nDiffstat:\n${diffstat.stdout || "none"}\n\nCommit message:\n${message}\n\nStage all and commit?`);
+        const status = await runCommand("git", ["-C", root, "status", "--short"], { timeout: 10000 });
+        const diffstat = await runCommand("git", ["-C", root, "diff", "--stat"], { timeout: 10000 });
+        const scope = workspace.kind === "project" && root !== workspace.resolvedPath ? normalizeSlashes(path.relative(root, workspace.resolvedPath)) : ".";
+        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus (repo full):\n${status.stdout || "clean"}\n\nDiffstat (repo full):\n${diffstat.stdout || "none"}\n\nCommit scope:\n${scope}\n\nCommit message:\n${message}\n\nStage scoped changes and commit?`);
         if (!ok) {
           sendCommandOutput(pi, "monofold:git commit", "Commit cancelled", { cancelled: true });
           return;
         }
-        await runCommand("git", ["-C", workspace.resolvedPath, "add", "-A"], { timeout: 10000 });
-        const commit = await runCommand("git", ["-C", workspace.resolvedPath, "commit", "-m", message], { timeout: 30000 });
+        await runCommand("git", ["-C", root, "add", "-A", "--", scope], { timeout: 10000 });
+        const commit = await runCommand("git", ["-C", root, "commit", "-m", message], { timeout: 30000 });
         sendCommandOutput(pi, `monofold:git commit ${formatWorkspaceLabel(workspace)}`, commit.stdout || commit.stderr, { workspace, message });
         return;
       }
 
       if (action === "push") {
-        const branch = await runCommand("git", ["-C", workspace.resolvedPath, "branch", "--show-current"], { timeout: 10000 });
-        const remote = await runCommand("git", ["-C", workspace.resolvedPath, "remote", "-v"], { timeout: 10000 });
-        const log = await runCommand("git", ["-C", workspace.resolvedPath, "log", "--oneline", "@{u}..HEAD"], {
+        const branch = await runCommand("git", ["-C", root, "branch", "--show-current"], { timeout: 10000 });
+        const remote = await runCommand("git", ["-C", root, "remote", "-v"], { timeout: 10000 });
+        const log = await runCommand("git", ["-C", root, "log", "--oneline", "@{u}..HEAD"], {
           timeout: 10000,
           allowExitCodes: [0, 128],
         });
-        const ok = await confirm(ctx, "Confirmed Push", `${formatWorkspaceLabel(workspace)}\n\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\n\nCommits to push:\n${log.stdout || "none/unknown upstream"}\n\nPush now?`);
+        const ok = await confirm(ctx, "Confirmed Push", `${formatWorkspaceLabel(workspace)}\n\nPush is repository/branch scoped.\n\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\n\nCommits to push:\n${log.stdout || "none/unknown upstream"}\n\nPush now?`);
         if (!ok) {
           sendCommandOutput(pi, "monofold:git push", "Push cancelled", { cancelled: true });
           return;
         }
-        const push = await runCommand("git", ["-C", workspace.resolvedPath, "push"], { timeout: 60000 });
+        const push = await runCommand("git", ["-C", root, "push"], { timeout: 60000 });
         sendCommandOutput(pi, `monofold:git push ${formatWorkspaceLabel(workspace)}`, push.stdout || push.stderr, { workspace });
         return;
       }
@@ -950,14 +1269,70 @@ ${manifest}
   const addCommand = async (args: string, ctx: ExtensionCommandContext) => {
     try {
       const workspaceBlock = buildWorkspaceFromAddArgs(args);
-      const configPath = path.join(ctx.cwd, CONFIG_RELATIVE_PATH);
-      await addWorkspaceToConfig(configPath, workspaceBlock);
+      const configFile = await resolveConfigFile(ctx.cwd, true);
+      await addWorkspaceToConfig(configFile.configPath, workspaceBlock);
       const loaded = await loadConfig(ctx.cwd);
       sendCommandOutput(pi, "monofold:add", `Added workspace:\n${YAML.stringify(workspaceBlock).trim()}\n\n${await buildManifest(loaded)}`, {
         workspace: workspaceBlock,
       });
     } catch (error) {
       sendCommandError(pi, "monofold:add", error, addUsage);
+    }
+  };
+
+  const projectAddUsage = [
+    "/monofold:project-add <path> --parent \"Workspace Name\" --tags project,slug",
+    "Parent by tags: --parent-tags vault,docs",
+    "Optional: --name \"Name\" --capabilities read,writeDocs --context CONTEXT.md --routes default=.,progress=Progress",
+    "Alias: /monofold_project_add ...",
+  ].join("\n");
+
+  const projectAddCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const { project, parent } = buildProjectFromAddArgs(args);
+      await addProjectToConfig(ctx, loaded, project, parent);
+      const next = await loadConfig(ctx.cwd);
+      sendCommandOutput(pi, "monofold:project-add", `Added project:\n${YAML.stringify(project).trim()}\n\n${await buildManifest(next)}`, { project });
+    } catch (error) {
+      sendCommandError(pi, "monofold:project-add", error, projectAddUsage);
+    }
+  };
+
+  const updateUsage = [
+    "/monofold:update [natural language configuration change request]",
+    `Migrates ${LEGACY_CONFIG_RELATIVE_PATH} to ${CONFIG_RELATIVE_PATH}, normalizes YAML, and validates the manifest.`,
+    "If a request is provided, it is handed off to the Pi agent after successful migration.",
+  ].join("\n");
+
+  const updateCommand = async (args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const plan = await buildConfigMigrationPlan(ctx.cwd);
+      if (plan.changed && ctx.hasUI) {
+        const ok = await ctx.ui.confirm("Monofold Update", `${formatMigrationPlan(plan)}\n\nApply migration?`);
+        if (!ok) {
+          sendCommandOutput(pi, "monofold:update", "Update cancelled", { cancelled: true });
+          return;
+        }
+      }
+
+      await applyConfigMigrationPlan(plan);
+      const loaded = await loadConfig(ctx.cwd);
+      sendCommandOutput(pi, "monofold:update", `${formatMigrationPlan(plan)}\n\nManifest validation: OK (${loaded.workspaces.length} targets)`, {
+        changed: plan.changed,
+        configPath: CONFIG_RELATIVE_PATH,
+        backupPath: plan.backupRelativePath,
+      });
+
+      let request = args.trim();
+      if (!request && ctx.hasUI) {
+        request = (await ctx.ui.input("Optional: describe workspace/project configuration changes to apply now", ""))?.trim() ?? "";
+      }
+      if (request) {
+        pi.sendUserMessage(buildConfigurationHandoffPrompt(request), { deliverAs: "followUp" });
+      }
+    } catch (error) {
+      sendCommandError(pi, "monofold:update", error, updateUsage);
     }
   };
 
@@ -971,18 +1346,48 @@ ${manifest}
   pi.registerCommand("monofold_write", { description: "Alias for /monofold:write", handler: writeCommand });
   pi.registerCommand("monofold:git", { description: "Run guarded workspace git status, commit, or push", handler: gitCommand });
   pi.registerCommand("monofold_git", { description: "Alias for /monofold:git", handler: gitCommand });
-  pi.registerCommand("monofold:add", { description: "Add a workspace to .pi/monofold.yml", handler: addCommand });
+  pi.registerCommand("monofold:add", { description: `Add a workspace to ${CONFIG_RELATIVE_PATH}`, handler: addCommand });
   pi.registerCommand("monofold_add", { description: "Alias for /monofold:add", handler: addCommand });
+  pi.registerCommand("monofold:project-add", { description: "Add a project workspace under a parent workspace", handler: projectAddCommand });
+  pi.registerCommand("monofold_project_add", { description: "Alias for /monofold:project-add", handler: projectAddCommand });
+  pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
 
   const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("monofold:init requires interactive UI", "error");
         return;
       }
-      const configPath = path.join(ctx.cwd, CONFIG_RELATIVE_PATH);
-      const exists = await pathExists(configPath);
+      const configFile = await resolveConfigFile(ctx.cwd, true);
+      const configPath = configFile.configPath;
+      const exists = configFile.kind !== "missing";
+      const addKind = exists ? await ctx.ui.select("What do you want to add?", ["Workspace", "Project Workspace"]) : "Workspace";
+      if (!addKind) return;
+      if (addKind === "Project Workspace") {
+        const loaded = await loadConfig(ctx.cwd);
+        const parentLabels = loaded.workspaces.filter((workspace) => workspace.kind === "workspace").map(formatWorkspaceLabel);
+        const parentLabel = await ctx.ui.select("Parent workspace", parentLabels);
+        if (!parentLabel) return;
+        const parent = loaded.workspaces.filter((workspace) => workspace.kind === "workspace")[parentLabels.indexOf(parentLabel)];
+        const projectPath = await ctx.ui.input("Project path relative to parent workspace", "4_Project/Example");
+        if (!projectPath) return;
+        const name = await ctx.ui.input("Optional project name", "");
+        const tagsInput = await ctx.ui.input("Project tags comma-separated", "project,example");
+        if (!tagsInput) return;
+        const capsInput = await ctx.ui.input("Optional capabilities override comma-separated", "");
+        const routesInput = await ctx.ui.input("Optional routes (default path or key=path list)", "");
+        const project: ProjectConfig = {
+          ...(name?.trim() ? { name: name.trim() } : {}),
+          path: projectPath.trim(),
+          tags: tagsInput.split(",").map((s) => s.trim()).filter(Boolean),
+          ...(capsInput?.trim() ? { capabilities: asCapabilityArray(capsInput.split(",").map((s) => s.trim()).filter(Boolean)) } : {}),
+          ...(routesInput?.trim() ? { routes: routesInput.includes("=") ? Object.fromEntries(routesInput.split(",").map((entry) => entry.split("=").map((part) => part.trim()))) as ProjectConfig["routes"] : { default: routesInput.trim() } } : {}),
+        };
+        await addProjectToConfig(ctx, loaded, project, { targetId: parent.targetId });
+        ctx.ui.notify(`Updated ${normalizeSlashes(path.relative(ctx.cwd, loaded.configPath))}`, "info");
+        return;
+      }
       if (exists) {
-        const ok = await ctx.ui.confirm("Existing config", `${CONFIG_RELATIVE_PATH} exists. Append a new workspace?`);
+        const ok = await ctx.ui.confirm("Existing config", `${configFile.relativePath} exists. Append a new workspace?`);
         if (!ok) return;
       }
       const workspacePath = await ctx.ui.input("Workspace path", "../business");
@@ -1010,11 +1415,11 @@ ${manifest}
       const next = exists ? `${current.trimEnd()}\n${addition}\n` : `version: 1\n\nworkspaces:\n${addition}\n`;
       await mkdir(path.dirname(configPath), { recursive: true });
       await writeFile(configPath, next, "utf8");
-      ctx.ui.notify(`Updated ${CONFIG_RELATIVE_PATH}`, "info");
+      ctx.ui.notify(`Updated ${configFile.relativePath}`, "info");
   };
 
   pi.registerCommand("monofold:init", {
-    description: "Create or update .pi/monofold.yml with an interactive wizard",
+    description: `Create or update ${CONFIG_RELATIVE_PATH} with an interactive wizard`,
     handler: initCommand,
   });
   pi.registerCommand("monofold_init", {
@@ -1025,7 +1430,7 @@ ${manifest}
   pi.registerTool({
     name: "monofold_init",
     label: "Workspace Init",
-    description: "Queue the interactive /monofold:init command to create or update .pi/monofold.yml.",
+    description: `Queue the interactive /monofold:init command to create or update ${CONFIG_RELATIVE_PATH}.`,
     parameters: Type.Object({}),
     async execute() {
       pi.sendUserMessage("/monofold:init", { deliverAs: "followUp" });

@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm pack --dry-run"
   },
   "peerDependencies": {
     "typebox": "*",
@@ -15,6 +16,11 @@
       "./index.ts"
     ]
   },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "index.ts"
+  ],
   "name": "pi-monofold",
   "devDependencies": {
     "typescript": "^6.0.3",
@@ -41,5 +47,8 @@
     "url": "https://github.com/eiei114/pi-monofold/issues"
   },
   "homepage": "https://github.com/eiei114/pi-monofold#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT"
 }

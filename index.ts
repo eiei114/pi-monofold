@@ -5,7 +5,9 @@ import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile
 import path from "node:path";
 import YAML from "yaml";
 
-type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "gitCommit" | "gitPush";
+type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
+type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
+type IntentCategory = "Explore" | "Write" | "Config" | "Git";
 type RouteType = "default" | "prd" | "design" | "progress" | "issue" | "research" | "decision";
 
 type RouteConfig = {
@@ -93,6 +95,9 @@ type ConfigMigrationPlan = {
   targetRelativePath: string;
   backupPath?: string;
   backupRelativePath?: string;
+  cleanupLegacyPath?: string;
+  cleanupLegacyBackupPath?: string;
+  cleanupLegacyBackupRelativePath?: string;
   normalizedText: string;
   loaded: LoadedConfig;
   actions: string[];
@@ -101,7 +106,8 @@ type ConfigMigrationPlan = {
 const CONFIG_RELATIVE_PATH = path.join(".pi", "monofold.yaml");
 const LEGACY_CONFIG_RELATIVE_PATH = path.join(".pi", "monofold.yml");
 const ROUTE_TYPES: RouteType[] = ["default", "prd", "design", "progress", "issue", "research", "decision"];
-const CAPABILITIES: CapabilityTag[] = ["read", "writeDocs", "editCode", "runCommands", "gitCommit", "gitPush"];
+const CAPABILITIES: CapabilityTag[] = ["read", "writeDocs", "editCode", "runCommands", "git"];
+const LEGACY_CAPABILITIES: LegacyCapabilityTag[] = [...CAPABILITIES, "gitCommit", "gitPush"];
 const DOC_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"]);
 const CODE_EXTENSIONS = new Set([
   ".ts",
@@ -182,12 +188,14 @@ function asStringArray(label: string, value: unknown, required = true): string[]
 
 function asCapabilityArray(value: unknown): CapabilityTag[] {
   const items = asStringArray("capabilities", value);
+  const normalized: CapabilityTag[] = [];
   for (const item of items) {
-    if (!CAPABILITIES.includes(item as CapabilityTag)) {
+    if (!LEGACY_CAPABILITIES.includes(item as LegacyCapabilityTag)) {
       throw new Error(`Unknown capability: ${item}`);
     }
+    normalized.push(item === "gitCommit" || item === "gitPush" ? "git" : (item as CapabilityTag));
   }
-  return items as CapabilityTag[];
+  return uniqueStrings(normalized) as CapabilityTag[];
 }
 
 function asOptionalCapabilityArray(value: unknown): CapabilityTag[] | undefined {
@@ -238,11 +246,16 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function resolveConfigFile(cwd: string, allowMissing = false): Promise<{ configPath: string; relativePath: string; kind: "canonical" | "legacy" | "missing" }> {
+async function resolveConfigFile(
+  cwd: string,
+  allowMissing = false,
+  options: { preferCanonicalOnConflict?: boolean } = {},
+): Promise<{ configPath: string; relativePath: string; kind: "canonical" | "legacy" | "missing" }> {
   const canonicalPath = path.join(cwd, CONFIG_RELATIVE_PATH);
   const legacyPath = path.join(cwd, LEGACY_CONFIG_RELATIVE_PATH);
   const [hasCanonical, hasLegacy] = await Promise.all([pathExists(canonicalPath), pathExists(legacyPath)]);
   if (hasCanonical && hasLegacy) {
+    if (options.preferCanonicalOnConflict) return { configPath: canonicalPath, relativePath: CONFIG_RELATIVE_PATH, kind: "canonical" };
     throw new Error(`Configuration file conflict: both ${CONFIG_RELATIVE_PATH} and ${LEGACY_CONFIG_RELATIVE_PATH} exist. Remove one before continuing.`);
   }
   if (hasCanonical) return { configPath: canonicalPath, relativePath: CONFIG_RELATIVE_PATH, kind: "canonical" };
@@ -282,7 +295,7 @@ function runCommand(
 }
 
 async function loadConfig(cwd: string): Promise<LoadedConfig> {
-  const { configPath } = await resolveConfigFile(cwd);
+  const { configPath } = await resolveConfigFile(cwd, false, { preferCanonicalOnConflict: true });
   const text = await readFile(configPath, "utf8");
   const parsed = YAML.parse(text, { uniqueKeys: true }) as unknown;
   return validateConfigObject(cwd, configPath, parsed);
@@ -436,6 +449,26 @@ function timestampSuffix(now = new Date()): string {
   return now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z").replace("T", "-").replace(/Z$/, "");
 }
 
+function normalizeCapabilityValues(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  return asCapabilityArray(value);
+}
+
+function normalizeConfigCapabilities(config: Record<string, unknown>): void {
+  const workspaces = Array.isArray(config.workspaces) ? (config.workspaces as unknown[]) : [];
+  for (const workspace of workspaces) {
+    if (!isRecord(workspace)) continue;
+    const capabilities = normalizeCapabilityValues(workspace.capabilities);
+    if (capabilities) workspace.capabilities = capabilities;
+    const projects = Array.isArray(workspace.projects) ? (workspace.projects as unknown[]) : [];
+    for (const project of projects) {
+      if (!isRecord(project)) continue;
+      const projectCapabilities = normalizeCapabilityValues(project.capabilities);
+      if (projectCapabilities) project.capabilities = projectCapabilities;
+    }
+  }
+}
+
 function normalizeConfigForMigration(parsed: unknown): Record<string, unknown> {
   if (!isRecord(parsed)) throw new Error("monofold config must be a YAML object");
   assertKnownKeys("monofold config", parsed, ROOT_KEYS);
@@ -444,11 +477,15 @@ function normalizeConfigForMigration(parsed: unknown): Record<string, unknown> {
   const normalized: Record<string, unknown> = { version: 1 };
   if (parsed.defaults !== undefined) normalized.defaults = parsed.defaults;
   normalized.workspaces = parsed.workspaces;
+  normalizeConfigCapabilities(normalized);
   return normalized;
 }
 
 async function buildConfigMigrationPlan(cwd: string): Promise<ConfigMigrationPlan> {
-  const source = await resolveConfigFile(cwd);
+  const canonicalPath = path.join(cwd, CONFIG_RELATIVE_PATH);
+  const legacyPath = path.join(cwd, LEGACY_CONFIG_RELATIVE_PATH);
+  const [hasCanonical, hasLegacy] = await Promise.all([pathExists(canonicalPath), pathExists(legacyPath)]);
+  const source = await resolveConfigFile(cwd, false, { preferCanonicalOnConflict: true });
   if (source.kind === "missing") throw new Error(`No Pi Monofold configuration found. Expected ${CONFIG_RELATIVE_PATH} or legacy ${LEGACY_CONFIG_RELATIVE_PATH}.`);
 
   const originalText = await readFile(source.configPath, "utf8");
@@ -457,13 +494,16 @@ async function buildConfigMigrationPlan(cwd: string): Promise<ConfigMigrationPla
   const targetPath = path.join(cwd, CONFIG_RELATIVE_PATH);
   const normalizedText = YAML.stringify(normalized).trimEnd() + "\n";
   const loaded = await validateConfigObject(cwd, targetPath, normalized);
-  const changed = source.kind !== "canonical" || originalText !== normalizedText;
+  const cleanupLegacy = hasCanonical && hasLegacy;
+  const changed = source.kind !== "canonical" || originalText !== normalizedText || cleanupLegacy;
   const actions: string[] = [];
   if (source.kind === "legacy") actions.push(`Move legacy config ${LEGACY_CONFIG_RELATIVE_PATH} to canonical ${CONFIG_RELATIVE_PATH}`);
   if (originalText !== normalizedText) actions.push("Normalize YAML and ensure version: 1 is explicit");
-  if (source.kind === "legacy") actions.push(`Remove legacy config ${LEGACY_CONFIG_RELATIVE_PATH} after writing ${CONFIG_RELATIVE_PATH}`);
+  if (source.kind === "legacy" || cleanupLegacy) actions.push(`Remove legacy config ${LEGACY_CONFIG_RELATIVE_PATH} after writing ${CONFIG_RELATIVE_PATH}`);
   if (!changed) actions.push(`Already current: ${CONFIG_RELATIVE_PATH} (version 1)`);
-  const backupPath = changed ? `${source.configPath}.bak-${timestampSuffix()}` : undefined;
+  const suffix = timestampSuffix();
+  const backupPath = changed && (source.kind === "legacy" || originalText !== normalizedText) ? `${source.configPath}.bak-${suffix}` : undefined;
+  const cleanupLegacyBackupPath = cleanupLegacy ? `${legacyPath}.bak-${suffix}` : undefined;
   return {
     changed,
     sourcePath: source.configPath,
@@ -473,6 +513,9 @@ async function buildConfigMigrationPlan(cwd: string): Promise<ConfigMigrationPla
     targetRelativePath: CONFIG_RELATIVE_PATH,
     backupPath,
     backupRelativePath: backupPath ? normalizeSlashes(path.relative(cwd, backupPath)) : undefined,
+    cleanupLegacyPath: cleanupLegacy ? legacyPath : undefined,
+    cleanupLegacyBackupPath,
+    cleanupLegacyBackupRelativePath: cleanupLegacyBackupPath ? normalizeSlashes(path.relative(cwd, cleanupLegacyBackupPath)) : undefined,
     normalizedText,
     loaded,
     actions,
@@ -481,11 +524,35 @@ async function buildConfigMigrationPlan(cwd: string): Promise<ConfigMigrationPla
 
 async function applyConfigMigrationPlan(plan: ConfigMigrationPlan): Promise<void> {
   if (!plan.changed) return;
-  if (!plan.backupPath) throw new Error("Migration backup path is required for changed configuration");
   await mkdir(path.dirname(plan.targetPath), { recursive: true });
-  await copyFile(plan.sourcePath, plan.backupPath);
+  if (plan.backupPath) await copyFile(plan.sourcePath, plan.backupPath);
+  if (plan.cleanupLegacyPath && plan.cleanupLegacyBackupPath) await copyFile(plan.cleanupLegacyPath, plan.cleanupLegacyBackupPath);
   await writeFile(plan.targetPath, plan.normalizedText, "utf8");
   if (plan.sourceKind === "legacy") await unlink(plan.sourcePath);
+  if (plan.cleanupLegacyPath) await unlink(plan.cleanupLegacyPath);
+}
+
+async function prepareIntentConfiguration(ctx: ExtensionCommandContext): Promise<boolean> {
+  const canonicalPath = path.join(ctx.cwd, CONFIG_RELATIVE_PATH);
+  const legacyPath = path.join(ctx.cwd, LEGACY_CONFIG_RELATIVE_PATH);
+  const [hasCanonical, hasLegacy] = await Promise.all([pathExists(canonicalPath), pathExists(legacyPath)]);
+  if (!hasCanonical && !hasLegacy) {
+    ctx.ui.notify(`No ${CONFIG_RELATIVE_PATH} found. Queueing /monofold:init.`, "info");
+    return false;
+  }
+  if (!hasCanonical && hasLegacy) {
+    try {
+      const plan = await buildConfigMigrationPlan(ctx.cwd);
+      await applyConfigMigrationPlan(plan);
+      if (plan.changed) {
+        ctx.ui.notify(`Migrated ${LEGACY_CONFIG_RELATIVE_PATH} to ${CONFIG_RELATIVE_PATH}${plan.backupRelativePath ? ` (backup: ${plan.backupRelativePath})` : ""}.`, "info");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Legacy migration failed; continuing with ${LEGACY_CONFIG_RELATIVE_PATH}: ${message}`, "error");
+    }
+  }
+  return true;
 }
 
 function formatMigrationPlan(plan: ConfigMigrationPlan): string {
@@ -493,7 +560,8 @@ function formatMigrationPlan(plan: ConfigMigrationPlan): string {
   return [
     `Source: ${plan.sourceRelativePath}`,
     `Target: ${plan.targetRelativePath}`,
-    `Backup: ${plan.backupRelativePath}`,
+    `Backup: ${plan.backupRelativePath ?? plan.cleanupLegacyBackupRelativePath ?? "none"}`,
+    ...(plan.backupRelativePath && plan.cleanupLegacyBackupRelativePath ? [`Legacy backup: ${plan.cleanupLegacyBackupRelativePath}`] : []),
     "",
     "Actions:",
     ...plan.actions.map((action) => `- ${action}`),
@@ -503,10 +571,59 @@ function formatMigrationPlan(plan: ConfigMigrationPlan): string {
 function buildConfigurationHandoffPrompt(request: string): string {
   return [
     "/monofold:update completed. Apply this requested Pi Monofold configuration change to `.pi/monofold.yaml`.",
-    "Edit the canonical config directly when needed, preserve valid YAML, then run `/monofold:list` as manifest validation.",
+    "Edit the canonical config directly when needed, preserve valid YAML, then run `monofold_list` as manifest validation.",
     "",
     "User request:",
     request.trim(),
+  ].join("\n");
+}
+
+function buildIntentHandoffPrompt(intent: IntentCategory, request: string): string {
+  const trimmed = request.trim();
+  const emptyInstruction =
+    intent === "Explore"
+      ? "Ask what the user wants to list, read, search, or inspect."
+      : intent === "Write"
+        ? "Ask what document to create and where it should be saved."
+        : intent === "Config"
+          ? "Ask what Workspace or Project Workspace configuration change is needed."
+          : "Ask whether the user wants git status, commit, push, or commit+push.";
+  return [
+    `Pi Monofold ${intent} request. Interpret the user's natural-language input and continue as the agent.`,
+    "",
+    "Rules:",
+    "- Use strict `monofold_*` tools as the execution API; do not ask the user to write JSON or YAML unless needed.",
+    "- Select a Workspace Target automatically only when the manifest makes it unique; if multiple targets match, ask one clarifying question.",
+    "- Ask missing information incrementally, one question at a time.",
+    "- Explore intent: read/search/tree/list is read-only; execute immediately when target and path/query are clear.",
+    "- Write intent: infer route/title/body/filename when possible, but confirm Workspace, route, and filename before calling `monofold_write`.",
+    "- Config intent: edit `.pi/monofold.yaml` only after showing the YAML diff; validate afterward with `monofold_list`.",
+    "- Git intent: use `monofold_git`; for commit+push use action `commitPush` and one combined confirmation. If message is missing, propose one from the diff.",
+    "- If there is no `.pi/monofold.yaml`, guide the user to `/monofold:init`.",
+    "",
+    "Intent:",
+    intent,
+    "",
+    "User request:",
+    trimmed || `(empty input) ${emptyInstruction}`,
+  ].join("\n");
+}
+
+function buildGuideHandoffPrompt(request: string): string {
+  return [
+    "Pi Monofold guide request. Start a conversational helper flow for Pi Monofold.",
+    "",
+    "Guide the user through Explore, Write, Config, Git, init, or update. Do not dump a static help page.",
+    "Ask one question at a time, then route to the appropriate intent behavior:",
+    "- Explore: list/read/search/tree workspaces.",
+    "- Write: routed Markdown output.",
+    "- Config: Workspace or Project Workspace configuration changes with YAML diff confirmation.",
+    "- Git: status/commit/push/commit+push via `monofold_git`.",
+    "- Init: queue or instruct `/monofold:init`.",
+    "- Update: run or instruct `/monofold:update` for migration/cleanup.",
+    "",
+    "Initial user request:",
+    request.trim() || "(empty input) Ask what they want to do with Pi Monofold.",
   ].join("\n");
 }
 
@@ -1028,9 +1145,9 @@ ${manifest}
   pi.registerTool({
     name: "monofold_git",
     label: "Workspace Git",
-    description: "Run guarded git status, commit, or push for one configured Git Workspace.",
+    description: "Run guarded git status, commit, push, or commitPush for one configured Git Workspace.",
     parameters: Type.Object({
-      action: Type.String({ description: "status, commit, or push" }),
+      action: Type.String({ description: "status, commit, push, or commitPush" }),
       message: Type.Optional(Type.String()),
       targetTags: Type.Optional(Type.Array(Type.String())),
       targetName: Type.Optional(Type.String()),
@@ -1038,7 +1155,7 @@ ${manifest}
       workspaceName: Type.Optional(Type.String()),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const required: CapabilityTag[] = params.action === "push" ? ["gitPush"] : params.action === "commit" ? ["gitCommit"] : [];
+      const required: CapabilityTag[] = params.action === "status" ? ["read"] : ["git"];
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
@@ -1050,18 +1167,35 @@ ${manifest}
       const root = await gitRoot(workspace);
       if (!root) throw new Error(`Not a Git Workspace: ${formatWorkspaceLabel(workspace)}`);
       if (params.action === "status") {
+        if (!workspace.capabilities.includes("read")) throw new Error(`Workspace lacks read capability: ${formatWorkspaceLabel(workspace)}`);
         const result = await runCommand("git", ["-C", root, "status", "--short", "--branch"], { signal, timeout: 10000 });
         return { content: [{ type: "text", text: result.stdout || "clean" }], details: { workspace } };
       }
-      if (params.action === "commit") {
+      if (!workspace.capabilities.includes("git")) throw new Error(`Workspace lacks git capability: ${formatWorkspaceLabel(workspace)}`);
+      if (params.action === "commit" || params.action === "commitPush") {
         const message = params.message ?? `Update ${workspace.name ?? (workspace.tags.join("-") || "workspace")}`;
         const status = await runCommand("git", ["-C", root, "status", "--short"], { signal, timeout: 10000 });
         const diffstat = await runCommand("git", ["-C", root, "diff", "--stat"], { signal, timeout: 10000 });
         const scope = workspace.kind === "project" && root !== workspace.resolvedPath ? normalizeSlashes(path.relative(root, workspace.resolvedPath)) : ".";
-        const ok = await confirm(ctx, "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus (repo full):\n${status.stdout || "clean"}\n\nDiffstat (repo full):\n${diffstat.stdout || "none"}\n\nCommit scope:\n${scope}\n\nCommit message:\n${message}\n\nStage scoped changes and commit?`);
-        if (!ok) return { content: [{ type: "text", text: "Commit cancelled" }], details: { cancelled: true } };
+        let pushContext = "";
+        if (params.action === "commitPush") {
+          const branch = await runCommand("git", ["-C", root, "branch", "--show-current"], { signal, timeout: 10000 });
+          const remote = await runCommand("git", ["-C", root, "remote", "-v"], { signal, timeout: 10000 });
+          const log = await runCommand("git", ["-C", root, "log", "--oneline", "@{u}..HEAD"], {
+            signal,
+            timeout: 10000,
+            allowExitCodes: [0, 128],
+          });
+          pushContext = `\n\nPush after commit:\nBranch: ${branch.stdout.trim()}\n\nRemote:\n${remote.stdout}\nCommits already ahead:\n${log.stdout || "none/unknown upstream"}`;
+        }
+        const ok = await confirm(ctx, params.action === "commitPush" ? "Workspace Commit + Push" : "Workspace Commit", `${formatWorkspaceLabel(workspace)}\n\nStatus (repo full):\n${status.stdout || "clean"}\n\nDiffstat (repo full):\n${diffstat.stdout || "none"}\n\nCommit scope:\n${scope}\n\nCommit message:\n${message}${pushContext}\n\n${params.action === "commitPush" ? "Stage scoped changes, commit, then push?" : "Stage scoped changes and commit?"}`);
+        if (!ok) return { content: [{ type: "text", text: params.action === "commitPush" ? "Commit+push cancelled" : "Commit cancelled" }], details: { cancelled: true } };
         await runCommand("git", ["-C", root, "add", "-A", "--", scope], { signal, timeout: 10000 });
         const commit = await runCommand("git", ["-C", root, "commit", "-m", message], { signal, timeout: 30000 });
+        if (params.action === "commitPush") {
+          const push = await runCommand("git", ["-C", root, "push"], { signal, timeout: 60000 });
+          return { content: [{ type: "text", text: [commit.stdout || commit.stderr, push.stdout || push.stderr].filter(Boolean).join("\n") }], details: { workspace, message } };
+        }
         return { content: [{ type: "text", text: commit.stdout || commit.stderr }], details: { workspace, message } };
       }
       if (params.action === "push") {
@@ -1206,7 +1340,7 @@ ${manifest}
     try {
       const parsed = parseCommandArgs(args);
       const action = parsed.positional[0] ?? "status";
-      const required: CapabilityTag[] = action === "push" ? ["gitPush"] : action === "commit" ? ["gitCommit"] : [];
+      const required: CapabilityTag[] = action === "status" ? ["read"] : ["git"];
       const loaded = await loadConfig(ctx.cwd);
       const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, required));
       const root = await gitRoot(workspace);
@@ -1322,6 +1456,7 @@ ${manifest}
         changed: plan.changed,
         configPath: CONFIG_RELATIVE_PATH,
         backupPath: plan.backupRelativePath,
+        legacyBackupPath: plan.cleanupLegacyBackupRelativePath,
       });
 
       let request = args.trim();
@@ -1336,20 +1471,26 @@ ${manifest}
     }
   };
 
-  pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces", handler: listCommand });
-  pi.registerCommand("monofold_list", { description: "Alias for /monofold:list", handler: listCommand });
-  pi.registerCommand("monofold:tree", { description: "Show a tree for a configured workspace", handler: readCommand });
-  pi.registerCommand("monofold:read", { description: "Read, tree, or search a configured workspace", handler: readCommand });
-  pi.registerCommand("monofold_read", { description: "Alias for /monofold:read", handler: readCommand });
-  pi.registerCommand("monofold:search", { description: "Search a configured workspace", handler: (args, ctx) => readCommand(`search ${args}`, ctx) });
-  pi.registerCommand("monofold:write", { description: "Write a routed Markdown document", handler: writeCommand });
-  pi.registerCommand("monofold_write", { description: "Alias for /monofold:write", handler: writeCommand });
-  pi.registerCommand("monofold:git", { description: "Run guarded workspace git status, commit, or push", handler: gitCommand });
-  pi.registerCommand("monofold_git", { description: "Alias for /monofold:git", handler: gitCommand });
-  pi.registerCommand("monofold:add", { description: `Add a workspace to ${CONFIG_RELATIVE_PATH}`, handler: addCommand });
-  pi.registerCommand("monofold_add", { description: "Alias for /monofold:add", handler: addCommand });
-  pi.registerCommand("monofold:project-add", { description: "Add a project workspace under a parent workspace", handler: projectAddCommand });
-  pi.registerCommand("monofold_project_add", { description: "Alias for /monofold:project-add", handler: projectAddCommand });
+  const intentCommand = (intent: IntentCategory) => async (args: string, ctx: ExtensionCommandContext) => {
+    const prepared = await prepareIntentConfiguration(ctx);
+    if (!prepared) {
+      pi.sendUserMessage("/monofold:init", { deliverAs: "followUp" });
+      return;
+    }
+    pi.sendUserMessage(buildIntentHandoffPrompt(intent, args), { deliverAs: "followUp" });
+    sendCommandOutput(pi, `monofold:${intent.toLowerCase()}`, `Queued ${intent} handoff.`, { intent, request: args.trim() });
+  };
+
+  const guideCommand = async (args: string, _ctx: ExtensionCommandContext) => {
+    pi.sendUserMessage(buildGuideHandoffPrompt(args), { deliverAs: "followUp" });
+    sendCommandOutput(pi, "monofold:guide", "Queued Monofold guide.", { request: args.trim() });
+  };
+
+  pi.registerCommand("monofold:explore", { description: "Explore configured workspaces via natural-language handoff", handler: intentCommand("Explore") });
+  pi.registerCommand("monofold:write", { description: "Create routed Markdown via natural-language handoff", handler: intentCommand("Write") });
+  pi.registerCommand("monofold:config", { description: "Change Workspace configuration via natural-language handoff", handler: intentCommand("Config") });
+  pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
+  pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
 
   const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
@@ -1395,7 +1536,7 @@ ${manifest}
       const name = await ctx.ui.input("Optional workspace name", "");
       const tagsInput = await ctx.ui.input("Tags comma-separated", "business,markdown");
       if (!tagsInput) return;
-      const capsInput = await ctx.ui.input("Capabilities comma-separated", "read,writeDocs,gitCommit");
+      const capsInput = await ctx.ui.input("Capabilities comma-separated", "read,writeDocs,git");
       if (!capsInput) return;
       const capabilities = capsInput.split(",").map((s) => s.trim()).filter(Boolean);
       const routePath = capabilities.includes("writeDocs") ? await ctx.ui.input("Default document route", "Notes") : undefined;
@@ -1420,10 +1561,6 @@ ${manifest}
 
   pi.registerCommand("monofold:init", {
     description: `Create or update ${CONFIG_RELATIVE_PATH} with an interactive wizard`,
-    handler: initCommand,
-  });
-  pi.registerCommand("monofold_init", {
-    description: "Alias for /monofold:init",
     handler: initCommand,
   });
 

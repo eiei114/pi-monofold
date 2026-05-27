@@ -1,5 +1,11 @@
 ﻿# Pi Monofold
 
+[![npm version](https://img.shields.io/npm/v/pi-monofold?color=cb3837&logo=npm)](https://www.npmjs.com/package/pi-monofold)
+[![Publish to npm](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml)
+[![Auto Release](https://github.com/eiei114/pi-monofold/actions/workflows/auto-release.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/auto-release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Pi Package](https://img.shields.io/badge/Pi-package-6f42c1)](https://github.com/eiei114/pi-monofold)
+
 Pi Monofold (`pi-monofold`) is a Pi Coding Agent extension that folds multiple local repositories and folders into a guarded **Virtual Monorepo** for AI agents.
 
 It keeps repositories physically separate, while giving Pi a lightweight manifest, routed writes, workspace-aware reads, guarded commands, and explicit git flows.
@@ -102,7 +108,7 @@ workspaces:
   - name: "Product docs"
     path: "../business"
     tags: [business, markdown, planning]
-    capabilities: [read, writeDocs, gitCommit]
+    capabilities: [read, writeDocs, git]
     contextFiles: [README.md, CONTEXT.md]
     routes:
       default: "Notes"
@@ -123,44 +129,49 @@ workspaces:
   - name: "Application"
     path: "../app"
     tags: [development, app]
-    capabilities: [read, editCode, runCommands, gitCommit, gitPush]
+    capabilities: [read, editCode, runCommands, git]
     contextFiles: [README.md, AGENTS.md]
 ```
 
-## Tools
-
-- `monofold_list`: show manifest and git status summary.
-- `monofold_read`: read files, search text, or show a tree inside readable workspaces.
-- `monofold_write`: create routed Markdown outputs by `routeType`, `title`, and `body`.
-- `monofold_git`: run guarded workspace git `status`, `commit`, or `push`.
-- `monofold_init`: queue `/monofold:init`.
-
 ## Commands
 
-- `/monofold:list` or `/monofold_list`: show manifest and git status summary.
-- `/monofold:add <path> --name "Name" --tags tag1,tag2 --capabilities read,editCode,runCommands,gitCommit`: add a workspace to `.pi/monofold.yaml`.
-- `/monofold:project-add <path> --parent "Name" --tags project,slug`: add a Project Workspace under a parent workspace.
-- `/monofold:update [natural language request]`: migrate legacy config to `.pi/monofold.yaml`, normalize YAML, validate the manifest, and optionally hand a config-change request to the agent.
-- `/monofold:read file <path> --target #0.1`: read a file from a workspace or project target.
-- `/monofold:tree [path] --target #0.1 --depth 2`: show a target tree.
-- `/monofold:search <query> --target #0.1`: search a target.
-- `/monofold:write --route progress --title "Title" --body "Markdown body"`: write routed Markdown.
-- `/monofold:git status|commit|push --target #0.1`: run guarded target git.
+Human-facing commands accept natural-language arguments and hand off interpretation to the Pi agent:
+
+- `/monofold:explore [request]`: list, read, search, or inspect workspace trees.
+- `/monofold:write [request]`: create routed Markdown outputs.
+- `/monofold:config [request]`: add or change Workspaces and Project Workspaces.
+- `/monofold:git [request]`: run git status, commit, push, or commit+push workflows.
+- `/monofold:guide`: start an interactive guide for Explore, Write, Config, Git, init, and update flows.
+- `/monofold:init`: create or update `.pi/monofold.yaml` with an interactive wizard.
+- `/monofold:update [request]`: migrate/clean up legacy config and optionally hand a config-change request to the agent.
 
 Examples:
 
 ```text
-/monofold:add C:/Projects/app --name "Application" --tags development,app --capabilities read,editCode,runCommands,gitCommit --context README.md,AGENTS.md
-/monofold:add ../business --name "Product Docs" --tags business,docs --capabilities read,writeDocs,gitCommit --routes default=Notes,progress=Progress,research=Research
-/monofold:project-add Projects/Launch --parent "Product Docs" --tags project,launch --routes default=.,progress=Progress
-/monofold:update rename the Product Docs workspace to Business Notes and add tag docs
+/monofold:explore show the project workspaces
+/monofold:write write today's progress note for Pi Monofold
+/monofold:config add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tag project,newapp
+/monofold:git commit and push the pi-monofold dev workspace
+/monofold:guide
 ```
+
+Fine-grained legacy commands such as `/monofold:list`, `/monofold:read`, `/monofold:search`, `/monofold:tree`, `/monofold:add`, `/monofold:project-add`, and underscore aliases are not part of the human command surface.
+
+## Agent API
+
+Pi agents use strict `monofold_*` tools behind the natural-language command surface:
+
+- `monofold_list`: show manifest and git status summary.
+- `monofold_read`: read files, search text, or show a tree inside readable workspaces.
+- `monofold_write`: create routed Markdown outputs by `routeType`, `title`, and `body`.
+- `monofold_git`: run guarded workspace git `status`, `commit`, `push`, or `commitPush`.
+- `monofold_init`: queue `/monofold:init`.
 
 Project Workspaces are listed under `workspaces[].projects`. Their `path` is relative to the parent workspace, `tags` are combined with parent tags, `capabilities` inherit unless explicitly replaced, and missing routes default to `default: "."` when the effective target has `writeDocs`.
 
 ## Updating configuration
 
-`.pi/monofold.yaml` is the canonical config file. Legacy `.pi/monofold.yml` is still readable, but `/monofold:update` migrates it to `.pi/monofold.yaml`, writes a timestamped backup such as `.pi/monofold.yml.bak-20260524-153012`, and removes the legacy file after a successful write. If both `.yaml` and `.yml` exist, Pi Monofold stops with a conflict error so you can choose the correct file manually.
+`.pi/monofold.yaml` is the canonical config file. Legacy `.pi/monofold.yml` is still readable. Intent commands try to migrate a legacy-only config automatically, show a notice, and continue with the legacy config if migration fails. `/monofold:update` migrates or cleans up legacy config, writes timestamped backups such as `.pi/monofold.yml.bak-20260524-153012`, and removes the legacy file after a successful write. If both `.yaml` and `.yml` exist, normal intent commands prefer canonical `.yaml`; `/monofold:update` handles legacy cleanup.
 
 `/monofold:update` is a configuration migration command, not a Pi package updater. Use `pi update`, `pi update --extensions`, or `pi install ...@new-ref` for package updates.
 
@@ -178,4 +189,4 @@ When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards
 - Docs write: requires `writeDocs`.
 - Code edit: requires `editCode`.
 - Bash: requires workspace cwd and `runCommands`.
-- Git commit/push via bash: blocked; use `monofold_git`.
+- Git commit/push via bash: blocked; use `/monofold:git` or the `monofold_git` agent tool.

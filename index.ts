@@ -4,6 +4,15 @@ import { execFile } from "node:child_process";
 import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
+import {
+  type FocusPreset,
+  ensureActiveFocusInitialized,
+  findFocusPresetById,
+  getActiveFocusPresetId,
+  parseFocusPresets,
+  warnZeroTargetMatchesForPreset,
+} from "./focus-preset.js";
+import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
 type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
@@ -42,6 +51,7 @@ type MultiWorkspaceConfig = {
     filenameTemplate?: string;
     metadata?: Record<string, unknown>;
   };
+  focusPresets?: FocusPreset[];
   workspaces: WorkspaceConfig[];
 };
 
@@ -135,24 +145,14 @@ const CODE_EXTENSIONS = new Set([
   ".scss",
   ".html",
 ]);
-const ROOT_KEYS = new Set(["version", "defaults", "workspaces"]);
+const ROOT_KEYS = new Set(["version", "defaults", "focusPresets", "workspaces"]);
 const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
 const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
-}
-
-function assertKnownKeys(label: string, value: Record<string, unknown>, allowed: Set<string>): void {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new Error(`${label} has unknown key: ${key}`);
-  }
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -172,18 +172,6 @@ function assertProjectPath(label: string, value: string): void {
   if (!normalized || normalized === ".") {
     throw new Error(`${label} must point below the parent workspace, not the parent root`);
   }
-}
-
-function uniqueStrings(items: string[]): string[] {
-  return [...new Set(items.filter(Boolean))];
-}
-
-function asStringArray(label: string, value: unknown, required = true): string[] {
-  if (value === undefined && !required) return [];
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return value;
 }
 
 function asCapabilityArray(value: unknown): CapabilityTag[] {
@@ -314,6 +302,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
   const defaultContextFiles = defaults ? asStringArray("defaults.contextFiles", defaults.contextFiles, false) : [];
   const defaultFilenameTemplate = typeof defaults?.filenameTemplate === "string" ? defaults.filenameTemplate : undefined;
   const defaultMetadata = isRecord(defaults?.metadata) ? (defaults.metadata as Record<string, unknown>) : undefined;
+  const focusPresets = parseFocusPresets(parsed.focusPresets, "focusPresets");
 
   const workspaces: ResolvedWorkspace[] = [];
   for (let index = 0; index < parsed.workspaces.length; index += 1) {
@@ -439,6 +428,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
         filenameTemplate: defaultFilenameTemplate,
         metadata: defaultMetadata,
       },
+      focusPresets: focusPresets.length > 0 ? focusPresets : undefined,
       workspaces: workspaces.filter((workspace) => workspace.kind === "workspace"),
     },
     workspaces,
@@ -476,6 +466,7 @@ function normalizeConfigForMigration(parsed: unknown): Record<string, unknown> {
   if (version !== 1) throw new Error("monofold config requires version: 1");
   const normalized: Record<string, unknown> = { version: 1 };
   if (parsed.defaults !== undefined) normalized.defaults = parsed.defaults;
+  if (parsed.focusPresets !== undefined) normalized.focusPresets = parsed.focusPresets;
   normalized.workspaces = parsed.workspaces;
   normalizeConfigCapabilities(normalized);
   return normalized;
@@ -1001,6 +992,21 @@ function inferBashCwd(ctx: ExtensionContext, command: string): string {
 }
 
 export default function piMultiWorkspace(pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      const activeId = getActiveFocusPresetId();
+      if (!activeId) return;
+      const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
+      if (!preset) return;
+      if (!ctx.hasUI) return;
+      warnZeroTargetMatchesForPreset(preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+    } catch {
+      return;
+    }
+  });
+
   pi.on("before_agent_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);

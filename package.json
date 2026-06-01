@@ -1,7 +1,8 @@
 {
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm pack --dry-run"
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "check": "npm run typecheck && npm test && npm pack --dry-run"
   },
   "peerDependencies": {
     "typebox": "*",
@@ -10,7 +11,7 @@
   },
   "description": "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "pi": {
     "extensions": [
       "./index.ts"
@@ -19,13 +20,15 @@
   "files": [
     "README.md",
     "LICENSE",
-    "index.ts"
+    "index.ts",
+    "focus-preset.ts"
   ],
   "name": "pi-monofold",
   "devDependencies": {
     "typescript": "^6.0.3",
     "typebox": "^1.1.38",
     "@types/node": "^25.9.1",
+    "tsx": "^4.20.5",
     "@earendil-works/pi-coding-agent": "^0.75.4",
     "@earendil-works/pi-ai": "^0.75.4"
   },

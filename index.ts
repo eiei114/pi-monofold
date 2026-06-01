@@ -4,6 +4,14 @@ import { execFile } from "node:child_process";
 import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
+import {
+  type FocusPreset,
+  ensureActiveFocusInitialized,
+  findFocusPresetById,
+  getActiveFocusPresetId,
+  parseFocusPresets,
+  warnZeroTargetMatchesForPreset,
+} from "./focus-preset.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
 type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
@@ -42,6 +50,7 @@ type MultiWorkspaceConfig = {
     filenameTemplate?: string;
     metadata?: Record<string, unknown>;
   };
+  focusPresets?: FocusPreset[];
   workspaces: WorkspaceConfig[];
 };
 
@@ -135,7 +144,7 @@ const CODE_EXTENSIONS = new Set([
   ".scss",
   ".html",
 ]);
-const ROOT_KEYS = new Set(["version", "defaults", "workspaces"]);
+const ROOT_KEYS = new Set(["version", "defaults", "focusPresets", "workspaces"]);
 const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
 const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
@@ -314,6 +323,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
   const defaultContextFiles = defaults ? asStringArray("defaults.contextFiles", defaults.contextFiles, false) : [];
   const defaultFilenameTemplate = typeof defaults?.filenameTemplate === "string" ? defaults.filenameTemplate : undefined;
   const defaultMetadata = isRecord(defaults?.metadata) ? (defaults.metadata as Record<string, unknown>) : undefined;
+  const focusPresets = parseFocusPresets(parsed.focusPresets, "focusPresets");
 
   const workspaces: ResolvedWorkspace[] = [];
   for (let index = 0; index < parsed.workspaces.length; index += 1) {
@@ -439,6 +449,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
         filenameTemplate: defaultFilenameTemplate,
         metadata: defaultMetadata,
       },
+      focusPresets: focusPresets.length > 0 ? focusPresets : undefined,
       workspaces: workspaces.filter((workspace) => workspace.kind === "workspace"),
     },
     workspaces,
@@ -476,6 +487,7 @@ function normalizeConfigForMigration(parsed: unknown): Record<string, unknown> {
   if (version !== 1) throw new Error("monofold config requires version: 1");
   const normalized: Record<string, unknown> = { version: 1 };
   if (parsed.defaults !== undefined) normalized.defaults = parsed.defaults;
+  if (parsed.focusPresets !== undefined) normalized.focusPresets = parsed.focusPresets;
   normalized.workspaces = parsed.workspaces;
   normalizeConfigCapabilities(normalized);
   return normalized;
@@ -1001,6 +1013,20 @@ function inferBashCwd(ctx: ExtensionContext, command: string): string {
 }
 
 export default function piMultiWorkspace(pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      const activeId = getActiveFocusPresetId();
+      if (!activeId) return;
+      const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
+      if (!preset) return;
+      warnZeroTargetMatchesForPreset(preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+    } catch {
+      return;
+    }
+  });
+
   pi.on("before_agent_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);

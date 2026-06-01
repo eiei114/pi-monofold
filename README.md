@@ -104,6 +104,12 @@ defaults:
     created: "{{date}}"
     source: "pi-monofold"
 
+focusPresets:
+  - id: control
+    label: Control workspace focus
+    targets:
+      - targetTags: [control]
+
 workspaces:
   - name: "Product docs"
     path: "../business"
@@ -132,6 +138,14 @@ workspaces:
     capabilities: [read, editCode, runCommands, git]
     contextFiles: [README.md, AGENTS.md]
 ```
+
+## Focus presets
+
+Optional `focusPresets` define tag-based focus targets for the control workspace. Preset `id` values must be unique. Each target uses `targetTags`, matching workspace tags the same way as other Monofold target selectors. Targets that match zero configured workspaces are allowed in config and emit a runtime warning when the active preset is applied.
+
+Active focus (the selected preset id) lives in extension session memory only. It resets when Pi restarts. When `focusPresets` is non-empty, the first preset in YAML order becomes active at session start unless a later slice changes it.
+
+The example above includes a generic seed preset `control`. Add matching workspace tags in your own config when you adopt it.
 
 ## Commands
 

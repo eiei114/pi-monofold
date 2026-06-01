@@ -1,3 +1,5 @@
+import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
+
 export type FocusPresetTarget = {
   targetTags: string[];
 };
@@ -15,28 +17,7 @@ export type FocusMatchableWorkspace = {
 const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets"]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertKnownKeys(label: string, value: Record<string, unknown>, allowed: Set<string>): void {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new Error(`${label} has unknown key: ${key}`);
-  }
-}
-
-function asStringArray(label: string, value: unknown, required = true): string[] {
-  if (value === undefined && !required) return [];
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return value;
-}
-
-function uniqueStrings(items: string[]): string[] {
-  return [...new Set(items.filter(Boolean))];
-}
-
+/** Parses and validates focus preset configuration from YAML/JSON input. */
 export function parseFocusPresets(value: unknown, label = "focusPresets"): FocusPreset[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
@@ -53,15 +34,20 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
     if (typeof item.label !== "string" || item.label.trim() === "") {
       throw new Error(`${itemLabel}.label must be a non-empty string`);
     }
-    if (!Array.isArray(item.targets)) throw new Error(`${itemLabel}.targets must be an array`);
+    if (!Array.isArray(item.targets) || item.targets.length === 0) {
+      throw new Error(`${itemLabel}.targets must be a non-empty array`);
+    }
     const targets: FocusPresetTarget[] = [];
     for (let targetIndex = 0; targetIndex < item.targets.length; targetIndex += 1) {
       const target = item.targets[targetIndex];
       const targetLabel = `${itemLabel}.targets[${targetIndex}]`;
       if (!isRecord(target)) throw new Error(`${targetLabel} must be an object`);
       assertKnownKeys(targetLabel, target, FOCUS_PRESET_TARGET_KEYS);
-      const targetTags = asStringArray(`${targetLabel}.targetTags`, target.targetTags);
-      targets.push({ targetTags: uniqueStrings(targetTags) });
+      const targetTags = uniqueStrings(asStringArray(`${targetLabel}.targetTags`, target.targetTags));
+      if (targetTags.length === 0) {
+        throw new Error(`${targetLabel}.targetTags must contain at least one non-empty string`);
+      }
+      targets.push({ targetTags });
     }
     if (seenIds.has(item.id)) throw new Error(`${label} has duplicate preset id: ${item.id}`);
     seenIds.add(item.id);
@@ -70,20 +56,24 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
   return presets;
 }
 
+/** Returns the first preset id, or null when no focus preset is available. */
 export function pickDefaultFocusPresetId(focusPresets: FocusPreset[] | undefined): string | null {
   if (!focusPresets || focusPresets.length === 0) return null;
   return focusPresets[0]?.id ?? null;
 }
 
+/** Finds a focus preset by stable id. */
 export function findFocusPresetById(focusPresets: FocusPreset[] | undefined, id: string): FocusPreset | undefined {
   return focusPresets?.find((preset) => preset.id === id);
 }
 
+/** Returns true when every requested focus tag is present on a workspace. */
 export function matchesFocusTarget(workspace: FocusMatchableWorkspace, targetTags: string[]): boolean {
   if (targetTags.length === 0) return false;
   return targetTags.every((tag) => workspace.tags.includes(tag));
 }
 
+/** Counts workspaces matched by a focus target's tag set. */
 export function countMatchingWorkspaces(
   workspaces: FocusMatchableWorkspace[],
   targetTags: string[],
@@ -91,6 +81,7 @@ export function countMatchingWorkspaces(
   return workspaces.filter((workspace) => matchesFocusTarget(workspace, targetTags)).length;
 }
 
+/** Emits warnings for a preset's targets that do not match any configured workspace. */
 export function warnZeroTargetMatchesForPreset(
   preset: FocusPreset,
   workspaces: FocusMatchableWorkspace[],
@@ -108,16 +99,19 @@ export function warnZeroTargetMatchesForPreset(
 let activeFocusPresetId: string | null = null;
 let activeFocusInitialized = false;
 
+/** Initializes the active focus preset once per process/session. */
 export function ensureActiveFocusInitialized(focusPresets: FocusPreset[] | undefined): void {
   if (activeFocusInitialized) return;
   activeFocusInitialized = true;
   activeFocusPresetId = pickDefaultFocusPresetId(focusPresets);
 }
 
+/** Returns the current active focus preset id, if any. */
 export function getActiveFocusPresetId(): string | null {
   return activeFocusPresetId;
 }
 
+/** Sets the active focus preset after validating that the id exists. */
 export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] | undefined): void {
   if (!findFocusPresetById(focusPresets, id)) {
     throw new Error(`Unknown focus preset id: ${id}`);
@@ -126,6 +120,7 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   activeFocusInitialized = true;
 }
 
+/** Clears the active focus preset for the current process/session. */
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = true;

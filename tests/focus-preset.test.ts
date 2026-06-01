@@ -80,6 +80,51 @@ describe("parseFocusPresets", () => {
       /unknown key: workspaceName/,
     );
   });
+
+  it("rejects presets with empty targets", () => {
+    assert.throws(
+      () => parseFocusPresets([{ id: "control", label: "Control", targets: [] }]),
+      /targets must be a non-empty array/,
+    );
+  });
+
+  it("rejects targets with no tags after dedupe", () => {
+    assert.throws(
+      () =>
+        parseFocusPresets([
+          {
+            id: "empty",
+            label: "Empty",
+            targets: [{ targetTags: [] }],
+          },
+        ]),
+      /targetTags must contain at least one non-empty string/,
+    );
+    assert.throws(
+      () =>
+        parseFocusPresets([
+          {
+            id: "control",
+            label: "Control",
+            targets: [{ targetTags: ["", ""] }],
+          },
+        ]),
+      /targetTags must contain at least one non-empty string/,
+    );
+  });
+
+  it("dedupes target tags and rejects empty deduped targets", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        { id: "control", label: "Control", targets: [{ targetTags: ["control", "", "control"] }] },
+      ]),
+      [{ id: "control", label: "Control", targets: [{ targetTags: ["control"] }] }],
+    );
+    assert.throws(
+      () => parseFocusPresets([{ id: "empty", label: "Empty", targets: [{ targetTags: [""] }] }]),
+      /targetTags must contain at least one non-empty string/,
+    );
+  });
 });
 
 describe("active focus session state", () => {
@@ -142,6 +187,30 @@ describe("runtime target matching", () => {
     );
     assert.equal(warnings.length, 0);
     assert.equal(countMatchingWorkspaces([{ tags: ["control"] }], ["control"]), 1);
+  });
+});
+
+describe("countMatchingWorkspaces", () => {
+  it("returns zero when no workspaces match", () => {
+    assert.equal(
+      countMatchingWorkspaces([{ tags: ["control"] }, { tags: ["docs"] }], ["planning"]),
+      0,
+    );
+  });
+
+  it("counts multiple matching workspaces", () => {
+    assert.equal(
+      countMatchingWorkspaces([{ tags: ["control"] }, { tags: ["control", "docs"] }, { tags: ["docs"] }], ["control"]),
+      2,
+    );
+  });
+
+  it("returns zero for an empty workspace list", () => {
+    assert.equal(countMatchingWorkspaces([], ["control"]), 0);
+  });
+
+  it("returns zero for empty target tags", () => {
+    assert.equal(countMatchingWorkspaces([{ tags: ["control"] }], []), 0);
   });
 });
 

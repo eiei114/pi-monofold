@@ -12,6 +12,7 @@ import {
   parseFocusPresets,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
+import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
 type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
@@ -150,18 +151,8 @@ const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "context
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
-}
-
-function assertKnownKeys(label: string, value: Record<string, unknown>, allowed: Set<string>): void {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new Error(`${label} has unknown key: ${key}`);
-  }
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -181,18 +172,6 @@ function assertProjectPath(label: string, value: string): void {
   if (!normalized || normalized === ".") {
     throw new Error(`${label} must point below the parent workspace, not the parent root`);
   }
-}
-
-function uniqueStrings(items: string[]): string[] {
-  return [...new Set(items.filter(Boolean))];
-}
-
-function asStringArray(label: string, value: unknown, required = true): string[] {
-  if (value === undefined && !required) return [];
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new Error(`${label} must be an array of strings`);
-  }
-  return value;
 }
 
 function asCapabilityArray(value: unknown): CapabilityTag[] {
@@ -1021,6 +1000,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
       if (!activeId) return;
       const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
       if (!preset) return;
+      if (!ctx.hasUI) return;
       warnZeroTargetMatchesForPreset(preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
     } catch {
       return;

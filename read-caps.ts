@@ -113,10 +113,14 @@ export function capSearchOutput(rawOutput: string, caps: ResolvedSearchCaps): Se
   };
 }
 
-export function capTreeLines(lines: string[], caps: ResolvedTreeCaps): TreeCapResult {
-  const entryCount = lines.length;
+export function capTreeLines(
+  lines: string[],
+  caps: ResolvedTreeCaps,
+  traversalTruncated = false,
+): TreeCapResult {
+  const entryCount = traversalTruncated ? lines.length + 1 : lines.length;
   const limited = lines.slice(0, caps.maxEntries);
-  const truncated = limited.length < entryCount;
+  const truncated = traversalTruncated || limited.length < lines.length;
   const returnedEntryCount = limited.length;
   const hint = truncated ? treeTruncationHint(entryCount, returnedEntryCount, caps) : undefined;
   const body = limited.join("\n");

@@ -888,15 +888,34 @@ async function buildManifest(loaded: LoadedConfig): Promise<string> {
   return lines.join("\n");
 }
 
-async function shallowTree(root: string, depth: number, prefix = ""): Promise<string[]> {
+type ShallowTreeBudget = {
+  remaining: number;
+  truncated: boolean;
+};
+
+async function shallowTree(
+  root: string,
+  depth: number,
+  prefix = "",
+  budget?: ShallowTreeBudget,
+): Promise<string[]> {
   if (depth < 0) return [];
+  if (budget && budget.remaining <= 0) {
+    budget.truncated = true;
+    return [];
+  }
   const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
   const lines: string[] = [];
   for (const entry of entries.filter((e) => !e.name.startsWith(".git") && e.name !== "node_modules")) {
+    if (budget && budget.remaining <= 0) {
+      budget.truncated = true;
+      break;
+    }
     const rel = normalizeSlashes(path.join(prefix, entry.name));
     lines.push(entry.isDirectory() ? `${rel}/` : rel);
+    if (budget) budget.remaining -= 1;
     if (entry.isDirectory() && depth > 0) {
-      lines.push(...(await shallowTree(root, depth - 1, rel)));
+      lines.push(...(await shallowTree(root, depth - 1, rel, budget)));
     }
   }
   return lines;
@@ -1053,9 +1072,9 @@ ${manifest}
       path: Type.Optional(Type.String({ description: "Workspace-relative path for file/tree" })),
       query: Type.Optional(Type.String({ description: "Search query for mode=search" })),
       depth: Type.Optional(Type.Number({ description: "Tree depth, default 1" })),
-      maxMatches: Type.Optional(Type.Number({ description: "Search: max match lines before truncation (default 50)" })),
-      maxChars: Type.Optional(Type.Number({ description: "Search: max output characters before truncation (default 8000)" })),
-      maxEntries: Type.Optional(Type.Number({ description: "Tree: max entries before truncation (default 200)" })),
+      maxMatches: Type.Optional(Type.Integer({ minimum: 1, description: "Search: max match lines before truncation (default 50)" })),
+      maxChars: Type.Optional(Type.Integer({ minimum: 1, description: "Search: max output characters before truncation (default 8000)" })),
+      maxEntries: Type.Optional(Type.Integer({ minimum: 1, description: "Tree: max entries before truncation (default 200)" })),
       targetTags: Type.Optional(Type.Array(Type.String())),
       targetName: Type.Optional(Type.String()),
       targetId: Type.Optional(Type.String()),
@@ -1082,8 +1101,9 @@ ${manifest}
         const root = params.path ? relativePath(workspace, params.path) : workspace.resolvedPath;
         const depth = Math.max(0, Math.min(5, params.depth ?? 1));
         const treeCaps = resolveTreeCaps({ maxEntries: params.maxEntries });
-        const rawLines = await shallowTree(root, depth);
-        const capped = capTreeLines(rawLines, treeCaps);
+        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
+        const rawLines = await shallowTree(root, depth, "", treeBudget);
+        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
         return {
           content: [{ type: "text", text: capped.text }],
           details: {
@@ -1299,8 +1319,10 @@ ${manifest}
         const depth = Number.parseInt(stringFlag(parsed.flags, "depth", "d") ?? "1", 10);
         const root = inputPath ? relativePath(workspace, inputPath) : workspace.resolvedPath;
         const treeDepth = Math.max(0, Math.min(5, Number.isFinite(depth) ? depth : 1));
-        const rawLines = await shallowTree(root, treeDepth);
-        const capped = capTreeLines(rawLines, resolveTreeCaps());
+        const treeCaps = resolveTreeCaps();
+        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
+        const rawLines = await shallowTree(root, treeDepth, "", treeBudget);
+        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
         sendCommandOutput(pi, `monofold:tree ${formatWorkspaceLabel(workspace)}:${inputPath || "."}`, capped.text, {
           workspace,
           path: inputPath || ".",

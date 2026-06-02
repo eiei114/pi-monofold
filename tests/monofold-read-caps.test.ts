@@ -90,4 +90,14 @@ describe("capTreeLines", () => {
     assert.match(result.text, /\[truncated: showing 5 of 250 entries/);
     assert.ok(result.hint);
   });
+
+  it("marks traversal-truncated trees when total count is unknown", () => {
+    const lines = Array.from({ length: 5 }, (_, i) => `entry-${i}.txt`);
+    const caps = resolveTreeCaps({ maxEntries: 5 });
+    const result = capTreeLines(lines, caps, true);
+    assert.equal(result.entryCount, 6);
+    assert.equal(result.returnedEntryCount, 5);
+    assert.equal(result.truncated, true);
+    assert.match(result.text, /\[truncated: showing 5 of 6 entries/);
+  });
 });

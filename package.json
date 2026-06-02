@@ -21,6 +21,7 @@
     "README.md",
     "LICENSE",
     "index.ts",
+    "file-read-preview.ts",
     "focus-preset.ts",
     "validation.ts"
   ],

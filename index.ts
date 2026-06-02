@@ -1,7 +1,7 @@
 ﻿import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
-import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -12,6 +12,7 @@ import {
   parseFocusPresets,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
+import { buildFileReadResponse } from "./file-read-preview.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
@@ -1047,6 +1048,18 @@ ${manifest}
       path: Type.Optional(Type.String({ description: "Workspace-relative path for file/tree" })),
       query: Type.Optional(Type.String({ description: "Search query for mode=search" })),
       depth: Type.Optional(Type.Number({ description: "Tree depth, default 1" })),
+      includeContent: Type.Optional(
+        Type.Boolean({ description: "mode=file only: return full file content instead of a bounded preview" }),
+      ),
+      maxChars: Type.Optional(
+        Type.Number({ description: "mode=file only: maximum characters to return in the preview body" }),
+      ),
+      head: Type.Optional(
+        Type.Number({ description: "mode=file only: include the first N lines when building a bounded preview" }),
+      ),
+      tail: Type.Optional(
+        Type.Number({ description: "mode=file only: include the last N lines when building a bounded preview" }),
+      ),
       targetTags: Type.Optional(Type.Array(Type.String())),
       targetName: Type.Optional(Type.String()),
       targetId: Type.Optional(Type.String()),
@@ -1066,8 +1079,29 @@ ${manifest}
       if (params.mode === "file") {
         if (!params.path) throw new Error("monofold_read mode=file requires path");
         const filePath = relativePath(workspace, params.path);
-        const text = await readFile(filePath, "utf8");
-        return { content: [{ type: "text", text }], details: { workspace: formatWorkspaceLabel(workspace), path: params.path } };
+        const [content, fileStat] = await Promise.all([
+          readFile(filePath, "utf8"),
+          stat(filePath),
+        ]);
+        const preview = buildFileReadResponse(
+          content,
+          {
+            includeContent: params.includeContent,
+            maxChars: params.maxChars,
+            head: params.head,
+            tail: params.tail,
+          },
+          { size: fileStat.size, mtime: fileStat.mtime },
+          { relativePath: params.path },
+        );
+        return {
+          content: [{ type: "text", text: preview.text }],
+          details: {
+            workspace: formatWorkspaceLabel(workspace),
+            path: params.path,
+            ...preview.details,
+          },
+        };
       }
       if (params.mode === "tree") {
         const root = params.path ? relativePath(workspace, params.path) : workspace.resolvedPath;

@@ -1,4 +1,4 @@
-﻿# pi-monofold
+# pi-monofold
 
 [![CI](https://github.com/eiei114/pi-monofold/actions/workflows/ci.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/ci.yml)
 [![Publish](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml)

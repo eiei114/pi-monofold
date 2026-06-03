@@ -24,6 +24,7 @@
     "path-normalize.ts",
     "file-read-preview.ts",
     "focus-preset.ts",
+    "monofold-read-ops.ts",
     "read-caps.ts",
     "validation.ts"
   ],

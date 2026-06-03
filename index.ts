@@ -1,7 +1,7 @@
 ﻿import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
-import { access, copyFile, mkdir, readFile, readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -12,13 +12,11 @@ import {
   parseFocusPresets,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
-import { buildFileReadResponse } from "./file-read-preview.js";
 import {
-  capSearchOutput,
-  capTreeLines,
-  resolveSearchCaps,
-  resolveTreeCaps,
-} from "./read-caps.js";
+  buildMonofoldTree,
+  readMonofoldFile,
+  runMonofoldSearch,
+} from "./monofold-read-ops.js";
 import { normalizeGuardPath } from "./path-normalize.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
@@ -688,6 +686,22 @@ function stringFlag(flags: Record<string, string | boolean>, ...names: string[])
   return undefined;
 }
 
+function booleanFlag(flags: Record<string, string | boolean>, ...names: string[]): boolean {
+  for (const name of names) {
+    const value = flags[name];
+    if (value === true || value === "true" || value === "1") return true;
+  }
+  return false;
+}
+
+function numberFlag(flags: Record<string, string | boolean>, label: string, ...names: string[]): number | undefined {
+  const raw = stringFlag(flags, ...names);
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) throw new Error(`${label} must be a number`);
+  return parsed;
+}
+
 function commandTarget(flags: Record<string, string | boolean>, requireCapabilities?: CapabilityTag[]): TargetInput {
   const workspace = stringFlag(flags, "target", "workspace", "w");
   const tags = stringFlag(flags, "tags", "tag")
@@ -894,39 +908,6 @@ async function buildManifest(loaded: LoadedConfig): Promise<string> {
   return lines.join("\n");
 }
 
-type ShallowTreeBudget = {
-  remaining: number;
-  truncated: boolean;
-};
-
-async function shallowTree(
-  root: string,
-  depth: number,
-  prefix = "",
-  budget?: ShallowTreeBudget,
-): Promise<string[]> {
-  if (depth < 0) return [];
-  if (budget && budget.remaining <= 0) {
-    budget.truncated = true;
-    return [];
-  }
-  const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
-  const lines: string[] = [];
-  for (const entry of entries.filter((e) => !e.name.startsWith(".git") && e.name !== "node_modules")) {
-    if (budget && budget.remaining <= 0) {
-      budget.truncated = true;
-      break;
-    }
-    const rel = normalizeSlashes(path.join(prefix, entry.name));
-    lines.push(entry.isDirectory() ? `${rel}/` : rel);
-    if (budget) budget.remaining -= 1;
-    if (entry.isDirectory() && depth > 0) {
-      lines.push(...(await shallowTree(root, depth - 1, rel, budget)));
-    }
-  }
-  return lines;
-}
-
 function slugify(title: string): string {
   const normalized = title
     .trim()
@@ -1112,21 +1093,12 @@ ${manifest}
       if (params.mode === "file") {
         if (!params.path) throw new Error("monofold_read mode=file requires path");
         const filePath = relativePath(workspace, params.path);
-        const [content, fileStat] = await Promise.all([
-          readFile(filePath, "utf8"),
-          stat(filePath),
-        ]);
-        const preview = buildFileReadResponse(
-          content,
-          {
-            includeContent: params.includeContent,
-            maxChars: params.maxChars,
-            head: params.head,
-            tail: params.tail,
-          },
-          { size: fileStat.size, mtime: fileStat.mtime },
-          { relativePath: params.path },
-        );
+        const preview = await readMonofoldFile(filePath, params.path, {
+          includeContent: params.includeContent,
+          maxChars: params.maxChars,
+          head: params.head,
+          tail: params.tail,
+        });
         return {
           content: [{ type: "text", text: preview.text }],
           details: {
@@ -1139,10 +1111,7 @@ ${manifest}
       if (params.mode === "tree") {
         const root = params.path ? relativePath(workspace, params.path) : workspace.resolvedPath;
         const depth = Math.max(0, Math.min(5, params.depth ?? 1));
-        const treeCaps = resolveTreeCaps({ maxEntries: params.maxEntries });
-        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
-        const rawLines = await shallowTree(root, depth, "", treeBudget);
-        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
+        const capped = await buildMonofoldTree(root, depth, { maxEntries: params.maxEntries });
         return {
           content: [{ type: "text", text: capped.text }],
           details: {
@@ -1158,17 +1127,11 @@ ${manifest}
       }
       if (params.mode === "search") {
         if (!params.query) throw new Error("monofold_read mode=search requires query");
-        const searchCaps = resolveSearchCaps({ maxMatches: params.maxMatches, maxChars: params.maxChars });
-        const result = await runCommand("rg", ["--line-number", "--hidden", "--glob", "!.git/**", params.query, params.path ?? "."], {
-          cwd: workspace.resolvedPath,
+        const capped = await runMonofoldSearch(runCommand, workspace.resolvedPath, params.query, params.path ?? ".", {
           signal,
-          timeout: 10000,
-          allowExitCodes: [0, 1],
+          maxMatches: params.maxMatches,
+          maxChars: params.maxChars,
         });
-        const rawOutput =
-          result.stdout.trim() ||
-          (result.exitCode !== 0 && result.exitCode !== 1 ? result.stderr.trim() : "");
-        const capped = capSearchOutput(rawOutput, searchCaps);
         return {
           content: [{ type: "text", text: capped.text }],
           details: {
@@ -1330,9 +1293,10 @@ ${manifest}
   };
 
   const readUsage = [
-    "/monofold:tree [path] [--workspace \"Name\"|--workspace #0] [--depth 2]",
-    "/monofold:read file <path> [--workspace \"Name\"|--workspace #0]",
-    "/monofold:search <query> [--workspace \"Name\"|--workspace #0]",
+    "/monofold:read file <path> [--workspace \"Name\"|--workspace #0] [--include-content] [--max-chars N] [--head N] [--tail N]",
+    "/monofold:tree [path] [--workspace \"Name\"|--workspace #0] [--depth 2] [--max-entries N]",
+    "/monofold:search <query> [--workspace \"Name\"|--workspace #0] [--path subdir] [--max-matches N] [--max-chars N]",
+    "Legacy read/search/tree commands return bounded previews by default. Pass --include-content or larger caps intentionally.",
     "Aliases: /monofold_read tree|file|search ...",
   ].join("\n");
 
@@ -1348,8 +1312,17 @@ ${manifest}
         const inputPath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional.slice(1).join(" ");
         if (!inputPath) throw new Error("file mode requires path");
         const filePath = relativePath(workspace, inputPath);
-        const text = await readFile(filePath, "utf8");
-        sendCommandOutput(pi, `monofold:read ${formatWorkspaceLabel(workspace)}:${inputPath}`, text, { workspace, path: inputPath });
+        const preview = await readMonofoldFile(filePath, inputPath, {
+          includeContent: booleanFlag(parsed.flags, "include-content", "includeContent"),
+          maxChars: numberFlag(parsed.flags, "max-chars", "maxChars", "max-chars"),
+          head: numberFlag(parsed.flags, "head", "head"),
+          tail: numberFlag(parsed.flags, "tail", "tail"),
+        });
+        sendCommandOutput(pi, `monofold:read ${formatWorkspaceLabel(workspace)}:${inputPath}`, preview.text, {
+          workspace,
+          path: inputPath,
+          ...preview.details,
+        });
         return;
       }
 
@@ -1358,13 +1331,17 @@ ${manifest}
         const depth = Number.parseInt(stringFlag(parsed.flags, "depth", "d") ?? "1", 10);
         const root = inputPath ? relativePath(workspace, inputPath) : workspace.resolvedPath;
         const treeDepth = Math.max(0, Math.min(5, Number.isFinite(depth) ? depth : 1));
-        const treeCaps = resolveTreeCaps();
-        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
-        const rawLines = await shallowTree(root, treeDepth, "", treeBudget);
-        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
+        const capped = await buildMonofoldTree(root, treeDepth, {
+          maxEntries: numberFlag(parsed.flags, "max-entries", "maxEntries", "max-entries"),
+        });
         sendCommandOutput(pi, `monofold:tree ${formatWorkspaceLabel(workspace)}:${inputPath || "."}`, capped.text, {
           workspace,
           path: inputPath || ".",
+          entryCount: capped.entryCount,
+          returnedEntryCount: capped.returnedEntryCount,
+          maxEntries: capped.maxEntries,
+          truncated: capped.truncated,
+          ...(capped.hint ? { hint: capped.hint } : {}),
         });
         return;
       }
@@ -1372,18 +1349,20 @@ ${manifest}
       if (mode === "search" || mode === "grep") {
         const query = stringFlag(parsed.flags, "query", "q") ?? parsed.positional.slice(1).join(" ");
         if (!query) throw new Error("search mode requires query");
-        const result = await runCommand("rg", ["--line-number", "--hidden", "--glob", "!.git/**", query, "."], {
-          cwd: workspace.resolvedPath,
-          timeout: 10000,
-          allowExitCodes: [0, 1],
+        const searchPath = stringFlag(parsed.flags, "path", "p") ?? ".";
+        const capped = await runMonofoldSearch(runCommand, workspace.resolvedPath, query, searchPath, {
+          maxMatches: numberFlag(parsed.flags, "max-matches", "maxMatches", "max-matches"),
+          maxChars: numberFlag(parsed.flags, "max-chars", "maxChars", "max-chars"),
         });
-        const rawOutput =
-          result.stdout.trim() ||
-          (result.exitCode !== 0 && result.exitCode !== 1 ? result.stderr.trim() : "");
-        const capped = capSearchOutput(rawOutput, resolveSearchCaps());
         sendCommandOutput(pi, `monofold:search ${formatWorkspaceLabel(workspace)}:${query}`, capped.text, {
           workspace,
           query,
+          matchCount: capped.matchCount,
+          returnedMatchCount: capped.returnedMatchCount,
+          maxMatches: capped.maxMatches,
+          maxChars: capped.maxChars,
+          truncated: capped.truncated,
+          ...(capped.hint ? { hint: capped.hint } : {}),
         });
         return;
       }
@@ -1606,6 +1585,26 @@ ${manifest}
   pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
   pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
+
+  pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces (legacy)", handler: listCommand });
+  pi.registerCommand("monofold_list", { description: "Alias for /monofold:list (legacy)", handler: listCommand });
+  pi.registerCommand("monofold:tree", { description: "Show a bounded tree for a configured workspace (legacy)", handler: readCommand });
+  pi.registerCommand("monofold:read", { description: "Read, tree, or search a configured workspace with safe defaults (legacy)", handler: readCommand });
+  pi.registerCommand("monofold_read", { description: "Alias for /monofold:read (legacy)", handler: readCommand });
+  pi.registerCommand("monofold:search", {
+    description: "Search a configured workspace with safe defaults (legacy)",
+    handler: (args, ctx) => readCommand(`search ${args}`, ctx),
+  });
+  pi.registerCommand("monofold:add", { description: `Add a workspace to ${CONFIG_RELATIVE_PATH} (legacy)`, handler: addCommand });
+  pi.registerCommand("monofold_add", { description: "Alias for /monofold:add (legacy)", handler: addCommand });
+  pi.registerCommand("monofold:project-add", {
+    description: "Add a project workspace under a parent workspace (legacy)",
+    handler: projectAddCommand,
+  });
+  pi.registerCommand("monofold_project_add", {
+    description: "Alias for /monofold:project-add (legacy)",
+    handler: projectAddCommand,
+  });
 
   const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {

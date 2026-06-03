@@ -1,18 +1,31 @@
-﻿# Pi Monofold
+# pi-monofold
 
+[![CI](https://github.com/eiei114/pi-monofold/actions/workflows/ci.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/ci.yml)
+[![Publish](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml)
 [![npm version](https://img.shields.io/npm/v/pi-monofold?color=cb3837&logo=npm)](https://www.npmjs.com/package/pi-monofold)
-[![Publish to npm](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/publish.yml)
-[![Auto Release](https://github.com/eiei114/pi-monofold/actions/workflows/auto-release.yml/badge.svg)](https://github.com/eiei114/pi-monofold/actions/workflows/auto-release.yml)
+[![npm downloads](https://img.shields.io/npm/dw/pi-monofold)](https://www.npmjs.com/package/pi-monofold)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Pi Package](https://img.shields.io/badge/Pi-package-6f42c1)](https://github.com/eiei114/pi-monofold)
+[![Trusted Publishing](https://img.shields.io/badge/npm-provenance-yellow)](https://docs.npmjs.com/generating-provenance-statements)
 
-Pi Monofold (`pi-monofold`) is a Pi Coding Agent extension that folds multiple local repositories and folders into a guarded **Virtual Monorepo** for AI agents.
+Pi extension that folds multiple local repositories and folders into a guarded **Virtual Monorepo** for AI agents.
 
-It keeps repositories physically separate, while giving Pi a lightweight manifest, routed writes, workspace-aware reads, guarded commands, and explicit git flows.
+## What this is
 
-## Why
+Pi Monofold (`pi-monofold`) keeps repositories physically separate while giving Pi a lightweight manifest, routed writes, workspace-aware reads, guarded commands, and explicit git flows. Documentation, rules, product context, and implementation code can appear as one connected system without migrating everything into a single git repository.
 
-AI coding agents work best when documentation, rules, product context, and implementation code are visible as one connected system. Physical monorepos are not always practical. Pi Monofold gives Pi a logical monorepo boundary without forcing repository migration.
+See [docs/usage.md](./docs/usage.md) for configuration, commands, agent tools, and guard behavior.
+
+## Features
+
+- **Virtual monorepo manifest** — declare workspaces and project workspaces in `.pi/monofold.yaml`
+- **Routed Markdown writes** — route PRDs, progress notes, and other doc types to configured folders
+- **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces
+- **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags
+- **Focus presets** — tag-based focus targets for the control workspace
+- **Natural-language commands** — `/monofold:explore`, `/monofold:write`, `/monofold:config`, `/monofold:git`, and more
+- **Strict agent tools** — `monofold_*` tools for programmatic access behind the command surface
+- **Config migration** — upgrade legacy `.pi/monofold.yml` with backups and validation
 
 ## Install
 
@@ -26,16 +39,16 @@ Pi Monofold is a Pi package. Install it with Pi's package installer from git or 
 pi install git:github.com/eiei114/pi-monofold
 ```
 
-Install into the current project settings instead of user settings:
+Project-local install:
 
 ```powershell
 pi install -l git:github.com/eiei114/pi-monofold
 ```
 
-Pin a version/ref:
+Pin a version:
 
 ```powershell
-pi install git:github.com/eiei114/pi-monofold@v0.1.0
+pi install git:github.com/eiei114/pi-monofold@v0.3.1
 ```
 
 Try without installing:
@@ -46,13 +59,11 @@ pi -e git:github.com/eiei114/pi-monofold
 
 ### From npm
 
-After the package is published to npm:
-
 ```powershell
 pi install npm:pi-monofold
 ```
 
-Install into the current project settings instead of user settings:
+Project-local install:
 
 ```powershell
 pi install -l npm:pi-monofold
@@ -61,7 +72,7 @@ pi install -l npm:pi-monofold
 Pin a version:
 
 ```powershell
-pi install npm:pi-monofold@0.1.0
+pi install npm:pi-monofold@0.3.1
 ```
 
 Try without installing:
@@ -70,13 +81,63 @@ Try without installing:
 pi -e npm:pi-monofold
 ```
 
-### Local development
+## Quick start
+
+1. Install the extension (see [Install](#install)).
+2. In your control repository, create `.pi/monofold.yaml` with at least one workspace entry (or run `/monofold:init`).
+3. Start Pi in the control repository and run `/monofold:explore show the project workspaces`.
+4. Use `/monofold:write` for routed Markdown outputs and `/monofold:git` for guarded git workflows.
+
+Example command flows: [docs/examples.md](./docs/examples.md).
+
+## Usage summary
+
+| Surface | Purpose |
+|---------|---------|
+| `/monofold:explore` | List, read, search, or inspect workspace trees |
+| `/monofold:write` | Create routed Markdown outputs |
+| `/monofold:config` | Add or change workspaces and project workspaces |
+| `/monofold:git` | Run guarded git status, commit, push, or commit+push |
+| `/monofold:guide` | Interactive guide for common flows |
+| `/monofold:init` | Create or update `.pi/monofold.yaml` |
+| `/monofold:update` | Migrate legacy config and optionally request config edits |
+
+Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Full reference: [docs/usage.md](./docs/usage.md).
+
+## Package contents
+
+```text
+pi-monofold/
+├── .github/workflows/
+│   ├── auto-release.yml            # Auto-tag + release on merge to main
+│   ├── ci.yml                      # Validate on PR / push
+│   └── publish.yml                 # Publish to npm (Trusted Publishing)
+├── docs/
+│   ├── usage.md                    # Config, commands, agent API, guard
+│   ├── examples.md                 # Command examples
+│   └── release.md                  # Release and publish flow
+├── tests/
+│   └── focus-preset.test.ts
+├── CHANGELOG.md
+├── SECURITY.md
+├── focus-preset.ts
+├── index.ts
+├── LICENSE
+├── package.json
+├── README.md
+├── validation.ts
+└── tsconfig.json
+```
+
+## Development
+
+Clone and validate:
 
 ```powershell
 git clone https://github.com/eiei114/pi-monofold.git
 cd pi-monofold
 npm install
-npm run typecheck
+npm run check
 ```
 
 Try the local checkout without installing:
@@ -85,122 +146,27 @@ Try the local checkout without installing:
 pi -e .
 ```
 
-## Config
+## Release
 
-Place config in the control repository:
+Releases are automated. See [docs/release.md](./docs/release.md) for details.
 
-```text
-<control-repo>/.pi/monofold.yaml
-```
+1. Bump `version` in `package.json` and update `CHANGELOG.md`.
+2. Merge to `main`.
+3. **Auto Release** tags `v<version>` and creates a GitHub release when the tag is new.
+4. The tag triggers **Publish**, which publishes to npm with OIDC provenance.
 
-Example:
+## Security
 
-```yaml
-version: 1
+Pi Monofold intercepts standard Pi tool calls when monofold config is present. Writes and shell commands are allowed only when the resolved workspace grants the matching capability. Git commit/push via raw `bash` is blocked; use `/monofold:git` or `monofold_git` instead.
 
-defaults:
-  filenameTemplate: "{{date}}-{{slug}}.md"
-  metadata:
-    created: "{{date}}"
-    source: "pi-monofold"
+Report vulnerabilities per [SECURITY.md](./SECURITY.md).
 
-focusPresets:
-  - id: control
-    label: Control workspace focus
-    targets:
-      - targetTags: [control]
+## Links
 
-workspaces:
-  - name: "Product docs"
-    path: "../business"
-    tags: [business, markdown, planning]
-    capabilities: [read, writeDocs, git]
-    contextFiles: [README.md, CONTEXT.md]
-    routes:
-      default: "Notes"
-      prd:
-        path: "Docs/PRD"
-        filenameTemplate: "prd-{{slug}}.md"
-        metadata:
-          type: prd
-    projects:
-      - name: "Launch plan"
-        path: "Projects/Launch"
-        tags: [project, launch]
-        contextFiles: [CONTEXT.md]
-        routes:
-          default: "."
-          progress: "Progress"
+- **Repository**: <https://github.com/eiei114/pi-monofold>
+- **npm**: <https://www.npmjs.com/package/pi-monofold>
+- **Issues**: <https://github.com/eiei114/pi-monofold/issues>
 
-  - name: "Application"
-    path: "../app"
-    tags: [development, app]
-    capabilities: [read, editCode, runCommands, git]
-    contextFiles: [README.md, AGENTS.md]
-```
+## License
 
-## Focus presets
-
-Optional `focusPresets` define tag-based focus targets for the control workspace. Preset `id` values must be unique. Each target uses `targetTags`, matching workspace tags the same way as other Monofold target selectors. Targets that match zero configured workspaces are allowed in config and emit a runtime warning when the active preset is applied.
-
-Active focus (the selected preset id) lives in extension session memory only. It resets when Pi restarts. When `focusPresets` is non-empty, the first preset in YAML order becomes active at session start unless a later slice changes it.
-
-The example above includes a generic seed preset `control`. Add matching workspace tags in your own config when you adopt it.
-
-## Commands
-
-Human-facing commands accept natural-language arguments and hand off interpretation to the Pi agent:
-
-- `/monofold:explore [request]`: list, read, search, or inspect workspace trees.
-- `/monofold:write [request]`: create routed Markdown outputs.
-- `/monofold:config [request]`: add or change Workspaces and Project Workspaces.
-- `/monofold:git [request]`: run git status, commit, push, or commit+push workflows.
-- `/monofold:guide`: start an interactive guide for Explore, Write, Config, Git, init, and update flows.
-- `/monofold:init`: create or update `.pi/monofold.yaml` with an interactive wizard.
-- `/monofold:update [request]`: migrate/clean up legacy config and optionally hand a config-change request to the agent.
-
-Examples:
-
-```text
-/monofold:explore show the project workspaces
-/monofold:write write today's progress note for Pi Monofold
-/monofold:config add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tag project,newapp
-/monofold:git commit and push the pi-monofold dev workspace
-/monofold:guide
-```
-
-Fine-grained legacy commands such as `/monofold:list`, `/monofold:read`, `/monofold:search`, `/monofold:tree`, `/monofold:add`, `/monofold:project-add`, and underscore aliases are not part of the human command surface.
-
-## Agent API
-
-Pi agents use strict `monofold_*` tools behind the natural-language command surface:
-
-- `monofold_list`: show manifest and git status summary.
-- `monofold_read`: read files, search text, or show a tree inside readable workspaces.
-- `monofold_write`: create routed Markdown outputs by `routeType`, `title`, and `body`.
-- `monofold_git`: run guarded workspace git `status`, `commit`, `push`, or `commitPush`.
-- `monofold_init`: queue `/monofold:init`.
-
-Project Workspaces are listed under `workspaces[].projects`. Their `path` is relative to the parent workspace, `tags` are combined with parent tags, `capabilities` inherit unless explicitly replaced, and missing routes default to `default: "."` when the effective target has `writeDocs`.
-
-## Updating configuration
-
-`.pi/monofold.yaml` is the canonical config file. Legacy `.pi/monofold.yml` is still readable. Intent commands try to migrate a legacy-only config automatically, show a notice, and continue with the legacy config if migration fails. `/monofold:update` migrates or cleans up legacy config, writes timestamped backups such as `.pi/monofold.yml.bak-20260524-153012`, and removes the legacy file after a successful write. If both `.yaml` and `.yml` exist, normal intent commands prefer canonical `.yaml`; `/monofold:update` handles legacy cleanup.
-
-`/monofold:update` is a configuration migration command, not a Pi package updater. Use `pi update`, `pi update --extensions`, or `pi install ...@new-ref` for package updates.
-
-After migration, you can provide a natural-language configuration change request. The command hands that request to the Pi agent, which edits `.pi/monofold.yaml` directly and validates the result through the manifest path:
-
-```text
-/monofold:update add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tags project,newapp and progress route Progress
-```
-
-## Guard
-
-When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards standard `read/write/edit/grep/find/bash` calls against workspace capabilities.
-
-- Unknown path: confirm in UI, block without UI.
-- Docs write: requires `writeDocs`.
-- Code edit: requires `editCode`.
-- Bash: requires workspace cwd and `runCommands`.
-- Git commit/push via bash: blocked; use `/monofold:git` or the `monofold_git` agent tool.
+[MIT](LICENSE)

@@ -31,6 +31,9 @@ export type RunCommandFn = (
   },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number | string | null | undefined }>;
 
+/** Maximum depth allowed for {@link buildMonofoldTree} and shallow tree walks. */
+export const MAX_TREE_DEPTH = 5;
+
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
 }
@@ -48,7 +51,7 @@ export async function shallowTree(
   }
   const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
   const lines: string[] = [];
-  for (const entry of entries.filter((e) => !e.name.startsWith(".git") && e.name !== "node_modules")) {
+  for (const entry of entries.filter((e) => e.name !== ".git" && e.name !== "node_modules")) {
     if (budget && budget.remaining <= 0) {
       budget.truncated = true;
       break;
@@ -78,12 +81,19 @@ export async function readMonofoldFile(
   return { text: preview.text, details: preview.details };
 }
 
+/**
+ * Build a bounded directory tree for a workspace root.
+ *
+ * @param root - Absolute path to the workspace root.
+ * @param depth - Requested traversal depth; clamped to [0, {@link MAX_TREE_DEPTH}].
+ * @param options - Optional caps such as `maxEntries`.
+ */
 export async function buildMonofoldTree(
   root: string,
   depth: number,
   options?: { maxEntries?: number },
 ): Promise<TreeCapResult> {
-  const treeDepth = Math.max(0, Math.min(5, depth));
+  const treeDepth = Math.max(0, Math.min(MAX_TREE_DEPTH, depth));
   const treeCaps = resolveTreeCaps({ maxEntries: options?.maxEntries });
   const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
   const rawLines = await shallowTree(root, treeDepth, "", treeBudget);
@@ -98,12 +108,16 @@ export async function runMonofoldSearch(
   options?: { signal?: AbortSignal; maxMatches?: number; maxChars?: number },
 ): Promise<SearchCapResult & { rawOutput: string }> {
   const searchCaps = resolveSearchCaps({ maxMatches: options?.maxMatches, maxChars: options?.maxChars });
-  const result = await runCommand("rg", ["--line-number", "--hidden", "--glob", "!.git/**", query, searchPath], {
-    cwd,
-    signal: options?.signal,
-    timeout: 10000,
-    allowExitCodes: [0, 1],
-  });
+  const result = await runCommand(
+    "rg",
+    ["--line-number", "--hidden", "--glob", "!.git/**", "--glob", "!.github/**", query, searchPath],
+    {
+      cwd,
+      signal: options?.signal,
+      timeout: 10000,
+      allowExitCodes: [0, 1],
+    },
+  );
   const rawOutput =
     result.stdout.trim() || (result.exitCode !== 0 && result.exitCode !== 1 ? result.stderr.trim() : "");
   const capped = capSearchOutput(rawOutput, searchCaps);

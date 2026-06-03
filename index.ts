@@ -12,6 +12,12 @@ import {
   parseFocusPresets,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
+import {
+  capSearchOutput,
+  capTreeLines,
+  resolveSearchCaps,
+  resolveTreeCaps,
+} from "./read-caps.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
@@ -882,15 +888,34 @@ async function buildManifest(loaded: LoadedConfig): Promise<string> {
   return lines.join("\n");
 }
 
-async function shallowTree(root: string, depth: number, prefix = ""): Promise<string[]> {
+type ShallowTreeBudget = {
+  remaining: number;
+  truncated: boolean;
+};
+
+async function shallowTree(
+  root: string,
+  depth: number,
+  prefix = "",
+  budget?: ShallowTreeBudget,
+): Promise<string[]> {
   if (depth < 0) return [];
+  if (budget && budget.remaining <= 0) {
+    budget.truncated = true;
+    return [];
+  }
   const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
   const lines: string[] = [];
-  for (const entry of entries.filter((e) => !e.name.startsWith(".git") && e.name !== "node_modules").slice(0, 200)) {
+  for (const entry of entries.filter((e) => !e.name.startsWith(".git") && e.name !== "node_modules")) {
+    if (budget && budget.remaining <= 0) {
+      budget.truncated = true;
+      break;
+    }
     const rel = normalizeSlashes(path.join(prefix, entry.name));
     lines.push(entry.isDirectory() ? `${rel}/` : rel);
+    if (budget) budget.remaining -= 1;
     if (entry.isDirectory() && depth > 0) {
-      lines.push(...(await shallowTree(root, depth - 1, rel)));
+      lines.push(...(await shallowTree(root, depth - 1, rel, budget)));
     }
   }
   return lines;
@@ -1047,6 +1072,9 @@ ${manifest}
       path: Type.Optional(Type.String({ description: "Workspace-relative path for file/tree" })),
       query: Type.Optional(Type.String({ description: "Search query for mode=search" })),
       depth: Type.Optional(Type.Number({ description: "Tree depth, default 1" })),
+      maxMatches: Type.Optional(Type.Integer({ minimum: 1, description: "Search: max match lines before truncation (default 50)" })),
+      maxChars: Type.Optional(Type.Integer({ minimum: 1, description: "Search: max output characters before truncation (default 8000)" })),
+      maxEntries: Type.Optional(Type.Integer({ minimum: 1, description: "Tree: max entries before truncation (default 200)" })),
       targetTags: Type.Optional(Type.Array(Type.String())),
       targetName: Type.Optional(Type.String()),
       targetId: Type.Optional(Type.String()),
@@ -1071,19 +1099,50 @@ ${manifest}
       }
       if (params.mode === "tree") {
         const root = params.path ? relativePath(workspace, params.path) : workspace.resolvedPath;
-        const lines = await shallowTree(root, Math.max(0, Math.min(5, params.depth ?? 1)));
-        return { content: [{ type: "text", text: lines.join("\n") }], details: { workspace: formatWorkspaceLabel(workspace), path: params.path ?? "." } };
+        const depth = Math.max(0, Math.min(5, params.depth ?? 1));
+        const treeCaps = resolveTreeCaps({ maxEntries: params.maxEntries });
+        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
+        const rawLines = await shallowTree(root, depth, "", treeBudget);
+        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
+        return {
+          content: [{ type: "text", text: capped.text }],
+          details: {
+            workspace: formatWorkspaceLabel(workspace),
+            path: params.path ?? ".",
+            entryCount: capped.entryCount,
+            returnedEntryCount: capped.returnedEntryCount,
+            maxEntries: capped.maxEntries,
+            truncated: capped.truncated,
+            ...(capped.hint ? { hint: capped.hint } : {}),
+          },
+        };
       }
       if (params.mode === "search") {
         if (!params.query) throw new Error("monofold_read mode=search requires query");
+        const searchCaps = resolveSearchCaps({ maxMatches: params.maxMatches, maxChars: params.maxChars });
         const result = await runCommand("rg", ["--line-number", "--hidden", "--glob", "!.git/**", params.query, params.path ?? "."], {
           cwd: workspace.resolvedPath,
           signal,
           timeout: 10000,
           allowExitCodes: [0, 1],
         });
-        const output = result.stdout.trim() || result.stderr.trim() || "No matches";
-        return { content: [{ type: "text", text: output }], details: { workspace: formatWorkspaceLabel(workspace), query: params.query } };
+        const rawOutput =
+          result.stdout.trim() ||
+          (result.exitCode !== 0 && result.exitCode !== 1 ? result.stderr.trim() : "");
+        const capped = capSearchOutput(rawOutput, searchCaps);
+        return {
+          content: [{ type: "text", text: capped.text }],
+          details: {
+            workspace: formatWorkspaceLabel(workspace),
+            query: params.query,
+            matchCount: capped.matchCount,
+            returnedMatchCount: capped.returnedMatchCount,
+            maxMatches: capped.maxMatches,
+            maxChars: capped.maxChars,
+            truncated: capped.truncated,
+            ...(capped.hint ? { hint: capped.hint } : {}),
+          },
+        };
       }
       throw new Error(`Unknown monofold_read mode: ${params.mode}`);
     },
@@ -1259,8 +1318,12 @@ ${manifest}
         const inputPath = stringFlag(parsed.flags, "path", "p") ?? parsed.positional.slice(1).join(" ");
         const depth = Number.parseInt(stringFlag(parsed.flags, "depth", "d") ?? "1", 10);
         const root = inputPath ? relativePath(workspace, inputPath) : workspace.resolvedPath;
-        const lines = await shallowTree(root, Math.max(0, Math.min(5, Number.isFinite(depth) ? depth : 1)));
-        sendCommandOutput(pi, `monofold:tree ${formatWorkspaceLabel(workspace)}:${inputPath || "."}`, lines.join("\n"), {
+        const treeDepth = Math.max(0, Math.min(5, Number.isFinite(depth) ? depth : 1));
+        const treeCaps = resolveTreeCaps();
+        const treeBudget: ShallowTreeBudget = { remaining: treeCaps.maxEntries, truncated: false };
+        const rawLines = await shallowTree(root, treeDepth, "", treeBudget);
+        const capped = capTreeLines(rawLines, treeCaps, treeBudget.truncated);
+        sendCommandOutput(pi, `monofold:tree ${formatWorkspaceLabel(workspace)}:${inputPath || "."}`, capped.text, {
           workspace,
           path: inputPath || ".",
         });
@@ -1275,8 +1338,14 @@ ${manifest}
           timeout: 10000,
           allowExitCodes: [0, 1],
         });
-        const output = result.stdout.trim() || result.stderr.trim() || "No matches";
-        sendCommandOutput(pi, `monofold:search ${formatWorkspaceLabel(workspace)}:${query}`, output, { workspace, query });
+        const rawOutput =
+          result.stdout.trim() ||
+          (result.exitCode !== 0 && result.exitCode !== 1 ? result.stderr.trim() : "");
+        const capped = capSearchOutput(rawOutput, resolveSearchCaps());
+        sendCommandOutput(pi, `monofold:search ${formatWorkspaceLabel(workspace)}:${query}`, capped.text, {
+          workspace,
+          query,
+        });
         return;
       }
 

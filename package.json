@@ -22,6 +22,7 @@
     "LICENSE",
     "index.ts",
     "focus-preset.ts",
+    "read-caps.ts",
     "validation.ts"
   ],
   "name": "pi-monofold",

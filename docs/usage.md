@@ -121,3 +121,16 @@ When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards
 | Code edit | Requires `editCode` |
 | Bash | Requires workspace cwd and `runCommands` |
 | Git commit/push via bash | Blocked; use `/monofold:git` or `monofold_git` |
+
+### Windows paths
+
+On Windows with Git Bash or MSYS, Pi session cwd can arrive as a mixed path such as `C:/c/Users/...` instead of `C:/Users/...`. Pi Monofold normalizes these paths before workspace guard checks.
+
+For Development Workspace work, prefer canonical Windows paths in `cd` targets and in `.pi/monofold.yaml`:
+
+```powershell
+cd C:/Users/Keisu/Projects/OSS/pi-weighted-model-router
+```
+
+Use forward slashes or escaped backslashes. Avoid `/c/Users/...` style paths when moving between the control repo and OSS dev repos.
+

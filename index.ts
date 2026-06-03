@@ -19,6 +19,7 @@ import {
   resolveSearchCaps,
   resolveTreeCaps,
 } from "./read-caps.js";
+import { normalizeGuardPath } from "./path-normalize.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
@@ -163,7 +164,9 @@ function normalizeSlashes(value: string): string {
 }
 
 function isInside(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child);
+  const normalizedParent = normalizeGuardPath(parent);
+  const normalizedChild = normalizeGuardPath(child);
+  const relative = path.relative(normalizedParent, normalizedChild);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
@@ -246,8 +249,9 @@ async function resolveConfigFile(
   allowMissing = false,
   options: { preferCanonicalOnConflict?: boolean } = {},
 ): Promise<{ configPath: string; relativePath: string; kind: "canonical" | "legacy" | "missing" }> {
-  const canonicalPath = path.join(cwd, CONFIG_RELATIVE_PATH);
-  const legacyPath = path.join(cwd, LEGACY_CONFIG_RELATIVE_PATH);
+  const normalizedCwd = normalizeGuardPath(cwd);
+  const canonicalPath = path.join(normalizedCwd, CONFIG_RELATIVE_PATH);
+  const legacyPath = path.join(normalizedCwd, LEGACY_CONFIG_RELATIVE_PATH);
   const [hasCanonical, hasLegacy] = await Promise.all([pathExists(canonicalPath), pathExists(legacyPath)]);
   if (hasCanonical && hasLegacy) {
     if (options.preferCanonicalOnConflict) return { configPath: canonicalPath, relativePath: CONFIG_RELATIVE_PATH, kind: "canonical" };
@@ -290,10 +294,11 @@ function runCommand(
 }
 
 async function loadConfig(cwd: string): Promise<LoadedConfig> {
-  const { configPath } = await resolveConfigFile(cwd, false, { preferCanonicalOnConflict: true });
+  const normalizedCwd = normalizeGuardPath(cwd);
+  const { configPath } = await resolveConfigFile(normalizedCwd, false, { preferCanonicalOnConflict: true });
   const text = await readFile(configPath, "utf8");
   const parsed = YAML.parse(text, { uniqueKeys: true }) as unknown;
-  return validateConfigObject(cwd, configPath, parsed);
+  return validateConfigObject(normalizedCwd, configPath, parsed);
 }
 
 async function validateConfigObject(cwd: string, configPath: string, parsed: unknown): Promise<LoadedConfig> {
@@ -959,7 +964,7 @@ function classifyPath(targetPath: string): "docs" | "code" | "unknown" {
 }
 
 function findWorkspaceForPath(loaded: LoadedConfig, targetPath: string): ResolvedWorkspace | undefined {
-  const absolute = path.resolve(loaded.root, targetPath);
+  const absolute = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
   return [...loaded.workspaces].sort((a, b) => b.resolvedPath.length - a.resolvedPath.length).find((workspace) => isInside(workspace.resolvedPath, absolute));
 }
 
@@ -1011,10 +1016,11 @@ function bashContainsGitCommitOrPush(command: string): boolean {
 }
 
 function inferBashCwd(ctx: ExtensionContext, command: string): string {
+  const baseCwd = normalizeGuardPath(ctx.cwd);
   const match = command.match(/(?:^|[;&|]\s*)cd\s+([^;&|\n]+)/);
-  if (!match) return ctx.cwd;
+  if (!match) return baseCwd;
   const raw = match[1].trim().replace(/^['"]|['"]$/g, "");
-  return path.resolve(ctx.cwd, raw);
+  return normalizeGuardPath(path.resolve(baseCwd, raw));
 }
 
 export default function piMultiWorkspace(pi: ExtensionAPI) {

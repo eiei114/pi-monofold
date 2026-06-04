@@ -2,7 +2,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "check": "npm run typecheck && npm test && npm pack --dry-run"
+    "check": "npm run typecheck && npm test && npm pack --dry-run",
+    "version:check": "node scripts/check-version-bump.mjs"
   },
   "peerDependencies": {
     "typebox": "*",

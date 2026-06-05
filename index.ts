@@ -955,11 +955,20 @@ async function confirm(ctx: ExtensionContext, title: string, body: string): Prom
   return ctx.ui.confirm(title, body);
 }
 
+const sessionAllowedPaths = new Set<string>();
+
 async function maybeBlockUnknown(ctx: ExtensionContext, loaded: LoadedConfig, targetPath: string, action: string) {
   const workspace = findWorkspaceForPath(loaded, targetPath);
   if (workspace) return undefined;
-  const ok = await confirm(ctx, "Unknown Path", `${action} targets an unknown path:\n${targetPath}\nAllow this operation?`);
-  if (!ok) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  const normalized = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
+  if (sessionAllowedPaths.has(normalized)) return undefined;
+  if (!ctx.hasUI) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  const choice = await ctx.ui.select(
+    "Unknown Path",
+    ["Yes (always for this session)", "Yes (just this once)", "No"],
+  );
+  if (!choice || choice === "No") return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  if (choice === "Yes (always for this session)") sessionAllowedPaths.add(normalized);
   return undefined;
 }
 

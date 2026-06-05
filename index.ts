@@ -17,6 +17,12 @@ import {
   readMonofoldFile,
   runMonofoldSearch,
 } from "./monofold-read-ops.js";
+import {
+  clearUnknownPathAllows,
+  loadUnknownPathAllows,
+  rememberUnknownPathAllow,
+  UNKNOWN_PATH_ALLOWS_RELATIVE_PATH,
+} from "./unknown-path-allows.js";
 import { normalizeGuardPath } from "./path-normalize.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
@@ -955,20 +961,19 @@ async function confirm(ctx: ExtensionContext, title: string, body: string): Prom
   return ctx.ui.confirm(title, body);
 }
 
-const sessionAllowedPaths = new Set<string>();
-
 async function maybeBlockUnknown(ctx: ExtensionContext, loaded: LoadedConfig, targetPath: string, action: string) {
   const workspace = findWorkspaceForPath(loaded, targetPath);
   if (workspace) return undefined;
   const normalized = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
-  if (sessionAllowedPaths.has(normalized)) return undefined;
+  const storedAllows = await loadUnknownPathAllows(loaded.root);
+  if (storedAllows.has(normalized)) return undefined;
   if (!ctx.hasUI) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
   const choice = await ctx.ui.select(
-    "Unknown Path",
-    ["Yes (always for this session)", "Yes (just this once)", "No"],
+    `Unknown Path — ${normalized}`,
+    ["Yes (remember across sessions)", "Yes (just this once)", "No"],
   );
   if (!choice || choice === "No") return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
-  if (choice === "Yes (always for this session)") sessionAllowedPaths.add(normalized);
+  if (choice === "Yes (remember across sessions)") await rememberUnknownPathAllow(loaded.root, normalized);
   return undefined;
 }
 
@@ -1574,6 +1579,22 @@ ${manifest}
     }
   };
 
+  const clearUnknownPathAllowsCommand = async (_args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const count = await clearUnknownPathAllows(ctx.cwd);
+      sendCommandOutput(
+        pi,
+        "monofold:clear-unknown-path-allows",
+        count > 0
+          ? `Cleared ${count} remembered unknown path allow${count === 1 ? "" : "s"} from ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`
+          : `No remembered unknown path allows found at ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
+        { count, path: UNKNOWN_PATH_ALLOWS_RELATIVE_PATH },
+      );
+    } catch (error) {
+      sendCommandError(pi, "monofold:clear-unknown-path-allows", error, "/monofold:clear-unknown-path-allows");
+    }
+  };
+
   const intentCommand = (intent: IntentCategory) => async (args: string, ctx: ExtensionCommandContext) => {
     const prepared = await prepareIntentConfiguration(ctx);
     if (!prepared) {
@@ -1595,6 +1616,14 @@ ${manifest}
   pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
   pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
+  pi.registerCommand("monofold:clear-unknown-path-allows", {
+    description: `Clear remembered unknown-path allows stored in ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
+    handler: clearUnknownPathAllowsCommand,
+  });
+  pi.registerCommand("monofold_clear_unknown_path_allows", {
+    description: "Alias for /monofold:clear-unknown-path-allows",
+    handler: clearUnknownPathAllowsCommand,
+  });
 
   pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces (legacy)", handler: listCommand });
   pi.registerCommand("monofold_list", { description: "Alias for /monofold:list (legacy)", handler: listCommand });

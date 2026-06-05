@@ -98,6 +98,106 @@ Pi agents use strict `monofold_*` tools behind the natural-language command surf
 
 Project workspaces are listed under `workspaces[].projects`. Their `path` is relative to the parent workspace, `tags` are combined with parent tags, `capabilities` inherit unless explicitly replaced, and missing routes default to `default: "."` when the effective target has `writeDocs`.
 
+## Safe read contract (`monofold_read`)
+
+This section is the agent-facing contract for read tools. Implementations live in `file-read-preview.ts`, `read-caps.ts`, and `monofold-read-ops.ts`.
+
+### Why reads are bounded
+
+`monofold_read` resolves paths inside configured workspaces that may live outside the Pi session cwd. Tool output becomes part of the conversation transcript. Unbounded reads risk:
+
+- **Context pollution** — large files or wide search hits consume tokens and crowd out prior reasoning.
+- **Accidental full-repo dumps** — tree/search without caps can return thousands of lines.
+- **Implicit bias** — an agent may treat the first huge chunk as “the whole file” even when only a preview was intended.
+
+The safe default is therefore **metadata + bounded preview** for files, and **hard caps with explicit truncation markers** for search and tree. Full or larger reads remain available but must be **opt-in** via documented parameters.
+
+### Human vs agent surfaces
+
+| Audience | Preferred surface |
+|----------|-------------------|
+| Pi agents | `monofold_read` with explicit `mode` and cap parameters |
+| Humans | `/monofold:explore` (natural language; the agent chooses tools) |
+| Legacy / scripts | `/monofold:read`, `/monofold:tree`, `/monofold:search`, and underscore aliases — same caps, **not** documented as the primary UX |
+
+Do not tell users to prefer `/monofold:read` over `/monofold:explore`. Legacy commands exist for backward compatibility and mirror `monofold_read` behavior.
+
+### Mode: `file`
+
+**Default (no extra parameters):**
+
+1. Read the workspace-relative file from disk.
+2. Return a text block with file metadata (`Path`, `Byte size`, `Characters`, `Lines`, `Modified`).
+3. Append `--- preview ---` and the preview body.
+4. If the preview is smaller than the full file, append `[truncated]` plus a hint: pass `includeContent: true` for the full body, or use `head`, `tail`, and/or `maxChars` for a larger bounded slice.
+
+**Default preview limits:** first **20** lines, then clip to **2,000** characters (whichever is stricter). Small files that already fit both limits are returned in full with `truncated: false` in tool `details`.
+
+**Opt-in parameters (all positive integers when set):**
+
+| Parameter | Effect |
+|-----------|--------|
+| `includeContent: true` | Return the entire file when `maxChars`, `head`, and `tail` are unset |
+| `maxChars` | Cap preview/output characters (applies after line selection) |
+| `head` | Include the first N lines in the preview |
+| `tail` | Include the last N lines in the preview |
+| `head` + `tail` | Show both ends; omitted middle lines appear as `... [N lines omitted] ...` |
+
+**Tool `details` fields (file):** `truncated`, `characterCount`, `lineCount`, `previewLineCount`, `previewCharacterCount`, `includeContent`, and any of `maxChars` / `head` / `tail` that were set.
+
+### Mode: `search`
+
+Runs ripgrep inside the resolved workspace (default path `.`).
+
+**Default caps:** `maxMatches = 50`, `maxChars = 8000` (output character budget across returned lines).
+
+**Truncation:** When matches or characters exceed the cap, the text ends with:
+
+```text
+[truncated: showing X of Y matches (maxMatches=…, maxChars=…). Narrow path/query or pass higher maxMatches/maxChars intentionally.]
+```
+
+**Opt-in:** Pass higher `maxMatches` and/or `maxChars`, or narrow `path` / `query`.
+
+**Tool `details` fields (search):** `matchCount`, `returnedMatchCount`, `maxMatches`, `maxChars`, `truncated`, optional `hint`.
+
+### Mode: `tree`
+
+Lists files and directories under a workspace path (skips `.git` and `node_modules`).
+
+**Default caps:** `maxEntries = 200`, `depth` default **1** (clamped to **0–5**).
+
+**Truncation:** When traversal or the entry budget stops early:
+
+```text
+[truncated: showing X of Y entries (maxEntries=…). Narrow path/depth or pass a higher maxEntries intentionally.]
+```
+
+**Opt-in:** Pass higher `maxEntries`, lower `depth`, or a narrower `path`.
+
+**Tool `details` fields (tree):** `entryCount`, `returnedEntryCount`, `maxEntries`, `truncated`, optional `hint`.
+
+### Legacy slash commands (compatibility)
+
+`/monofold:read`, `/monofold:tree`, `/monofold:search`, and related aliases call the same preview/cap logic. Flags mirror tool parameters, for example:
+
+```text
+/monofold:read file path/to/file.md --include-content
+/monofold:read file path/to/large.log --head 40 --tail 20
+/monofold:search "pattern" --max-matches 100 --max-chars 16000
+/monofold:tree src --depth 2 --max-entries 500
+```
+
+Prefer `/monofold:explore` for interactive use; use `monofold_read` in agent tool calls.
+
+### Agent checklist
+
+1. Start with default `monofold_read` (no caps raised) unless you already know the file is tiny.
+2. If `details.truncated` is true or the body contains `[truncated]`, decide whether you need more—do not assume the preview is the full file.
+3. Request full content only with `includeContent: true` (file mode, no `head`/`tail`/`maxChars`).
+4. For partial follow-ups, prefer `head` / `tail` / targeted `search` over dumping entire large files.
+5. Use workspace targeting (`targetTags`, `workspaceName`, etc.) to keep reads inside the intended repo.
+
 ## Updating configuration
 
 `.pi/monofold.yaml` is the canonical config file. Legacy `.pi/monofold.yml` is still readable.

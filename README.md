@@ -20,7 +20,7 @@ See [docs/usage.md](./docs/usage.md) for configuration, commands, agent tools, a
 
 - **Virtual monorepo manifest** — declare workspaces and project workspaces in `.pi/monofold.yaml`
 - **Routed Markdown writes** — route PRDs, progress notes, and other doc types to configured folders
-- **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces
+- **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces, with bounded previews by default
 - **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags
 - **Focus presets** — tag-based focus targets for the control workspace
 - **Natural-language commands** — `/monofold:explore`, `/monofold:write`, `/monofold:config`, `/monofold:git`, and more
@@ -103,6 +103,29 @@ Example command flows: [docs/examples.md](./docs/examples.md).
 | `/monofold:update` | Migrate legacy config and optionally request config edits |
 
 Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Full reference: [docs/usage.md](./docs/usage.md).
+
+## Safe read defaults
+
+`monofold_read` can reach files across multiple configured workspaces. Returning full file bodies or unbounded search/tree output by default would flood the agent chat and can bias later turns. Pi Monofold therefore uses **preview-first, capped-by-default** reads.
+
+| `monofold_read` mode | Default output |
+|----------------------|----------------|
+| **file** | Path, size, line/character counts, modified time, then a bounded preview (first **20** lines, up to **2,000** characters). Files that already fit those bounds are shown in full without a truncation marker. |
+| **search** | Up to **50** match lines and **8,000** characters of ripgrep output. |
+| **tree** | Up to **200** entries; traversal depth is capped at **5**. |
+
+When output is cut, the tool response includes a **`[truncated]`** marker (file mode) or a **`[truncated: …]`** footer (search/tree) that states what was shown and how to request more.
+
+**Request more content intentionally:**
+
+| Goal | `monofold_read` parameters |
+|------|----------------------------|
+| Full file body | `mode: "file"`, `includeContent: true` |
+| Larger bounded file slice | `head`, `tail`, and/or `maxChars` (positive integers) |
+| More search results | Higher `maxMatches` and/or `maxChars`, or a narrower `path` / `query` |
+| Larger directory tree | Higher `maxEntries`, lower `depth`, or a narrower `path` |
+
+Agents should call **`monofold_read`** (not guess at raw Pi `read`). Humans should use **`/monofold:explore`** with natural language. Legacy slash commands such as `/monofold:read` apply the same caps for compatibility but are **not** the preferred human-facing surface—see [docs/usage.md](./docs/usage.md#safe-read-contract-monofold_read).
 
 ## Package contents
 

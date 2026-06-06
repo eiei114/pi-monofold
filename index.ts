@@ -1620,41 +1620,29 @@ ${manifest}
     description: `Clear remembered unknown-path allows stored in ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
     handler: clearUnknownPathAllowsCommand,
   });
-  pi.registerCommand("monofold_clear_unknown_path_allows", {
-    description: "Alias for /monofold:clear-unknown-path-allows",
-    handler: clearUnknownPathAllowsCommand,
-  });
+
 
   pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces (legacy)", handler: listCommand });
-  pi.registerCommand("monofold_list", { description: "Alias for /monofold:list (legacy)", handler: listCommand });
+
   pi.registerCommand("monofold:tree", {
     description: "Show a bounded tree for a configured workspace (legacy)",
     handler: (args, ctx) => readCommand(`tree ${args}`, ctx),
   });
-  pi.registerCommand("monofold_tree", {
-    description: "Alias for /monofold:tree (legacy)",
-    handler: (args, ctx) => readCommand(`tree ${args}`, ctx),
-  });
+
   pi.registerCommand("monofold:read", { description: "Read, tree, or search a configured workspace with safe defaults (legacy)", handler: readCommand });
-  pi.registerCommand("monofold_read", { description: "Alias for /monofold:read (legacy)", handler: readCommand });
+
   pi.registerCommand("monofold:search", {
     description: "Search a configured workspace with safe defaults (legacy)",
     handler: (args, ctx) => readCommand(`search ${args}`, ctx),
   });
-  pi.registerCommand("monofold_search", {
-    description: "Alias for /monofold:search (legacy)",
-    handler: (args, ctx) => readCommand(`search ${args}`, ctx),
-  });
+
   pi.registerCommand("monofold:add", { description: `Add a workspace to ${CONFIG_RELATIVE_PATH} (legacy)`, handler: addCommand });
-  pi.registerCommand("monofold_add", { description: "Alias for /monofold:add (legacy)", handler: addCommand });
+
   pi.registerCommand("monofold:project-add", {
     description: "Add a project workspace under a parent workspace (legacy)",
     handler: projectAddCommand,
   });
-  pi.registerCommand("monofold_project_add", {
-    description: "Alias for /monofold:project-add (legacy)",
-    handler: projectAddCommand,
-  });
+
 
   const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {

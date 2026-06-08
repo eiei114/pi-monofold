@@ -5,11 +5,16 @@ import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile
 import path from "node:path";
 import YAML from "yaml";
 import {
+  type ActiveFocusPresetPosition,
+  cycleActiveFocusPresetForward,
   type FocusPreset,
   ensureActiveFocusInitialized,
   findFocusPresetById,
   getActiveFocusPresetId,
+  getActiveFocusPresetPosition,
   parseFocusPresets,
+  setActiveFocusPresetByLabel,
+  setActiveFocusPresetId,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
 import {
@@ -162,6 +167,9 @@ const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
 const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
+const FOCUS_STATUS_ID = "monofold-focus";
+const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+f";
+const FOCUS_CYCLE_ACTION_ID = "app.monofold.focus.cycleForward";
 
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
@@ -862,6 +870,38 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
   sendCommandOutput(pi, command, `Error: ${message}\n\nUsage:\n${usage}`, { error: message });
 }
 
+function formatFocusStatus(position: ActiveFocusPresetPosition): string {
+  return `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT}`;
+}
+
+function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
+  if (!ctx.hasUI) return;
+  const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
+  ctx.ui.setStatus(FOCUS_STATUS_ID, position ? formatFocusStatus(position) : undefined);
+}
+
+function notifyFocusApplied(
+  ctx: ExtensionContext | ExtensionCommandContext,
+  loaded: LoadedConfig,
+  position: ActiveFocusPresetPosition,
+  source: "command" | "shortcut",
+): void {
+  updateFocusStatus(ctx, loaded);
+  warnZeroTargetMatchesForPreset(position.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+  ctx.ui.notify(
+    source === "shortcut"
+      ? `Active Focus: ${position.preset.label} (${position.index + 1}/${position.total})`
+      : `Active Focus set to ${position.preset.label} (${position.index + 1}/${position.total})`,
+    "info",
+  );
+}
+
+function notifyNoFocusPresets(ctx: ExtensionContext | ExtensionCommandContext, pi?: ExtensionAPI): void {
+  const message = `No focusPresets configured. Add focusPresets to ${CONFIG_RELATIVE_PATH}, then reload Pi.`;
+  ctx.ui.notify(message, "warning");
+  if (pi) sendCommandOutput(pi, "monofold:focus", message, { focusPresets: 0 });
+}
+
 async function resolveWorkspace(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
   const matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
   if (matches.length === 0) throw new Error(`No workspace matches target: ${JSON.stringify(target)}`);
@@ -1024,6 +1064,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
     try {
       const loaded = await loadConfig(ctx.cwd);
       ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      updateFocusStatus(ctx, loaded);
       const activeId = getActiveFocusPresetId();
       if (!activeId) return;
       const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
@@ -1610,15 +1651,82 @@ ${manifest}
     sendCommandOutput(pi, "monofold:guide", "Queued Monofold guide.", { request: args.trim() });
   };
 
+  const focusCommand = async (_args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const focusPresets = loaded.raw.focusPresets ?? [];
+      ensureActiveFocusInitialized(focusPresets);
+      updateFocusStatus(ctx, loaded);
+
+      if (focusPresets.length === 0) {
+        notifyNoFocusPresets(ctx, pi);
+        return;
+      }
+
+      if (!ctx.hasUI) {
+        const message = "/monofold:focus requires the Pi TUI to choose a focus preset.";
+        ctx.ui.notify(message, "warning");
+        sendCommandOutput(pi, "monofold:focus", message, { requiresTui: true });
+        return;
+      }
+
+      if (focusPresets.length === 1) {
+        const preset = focusPresets[0]!;
+        setActiveFocusPresetId(preset.id, focusPresets);
+        notifyFocusApplied(ctx, loaded, { preset, index: 0, total: 1 }, "command");
+        return;
+      }
+
+      const choice = await ctx.ui.select("Select Monofold Focus", focusPresets.map((preset) => preset.label));
+      if (!choice) {
+        ctx.ui.notify("Focus selection cancelled", "info");
+        return;
+      }
+      const position = setActiveFocusPresetByLabel(choice, focusPresets);
+      notifyFocusApplied(ctx, loaded, position, "command");
+    } catch (error) {
+      sendCommandError(pi, "monofold:focus", error, "/monofold:focus");
+    }
+  };
+
+  const cycleFocusForward = async (ctx: ExtensionContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const focusPresets = loaded.raw.focusPresets ?? [];
+      if (focusPresets.length === 0) {
+        notifyNoFocusPresets(ctx);
+        return;
+      }
+      const result = cycleActiveFocusPresetForward(focusPresets);
+      if (!result) return;
+      updateFocusStatus(ctx, loaded);
+      warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      if (focusPresets.length === 1) {
+        ctx.ui.notify(`Active Focus unchanged: ${result.preset.label} (1/1)`, "info");
+        return;
+      }
+      ctx.ui.notify(`Active Focus: ${result.preset.label} (${result.index + 1}/${result.total})`, "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Monofold focus cycle failed: ${message}`, "error");
+    }
+  };
+
   pi.registerCommand("monofold:explore", { description: "Explore configured workspaces via natural-language handoff", handler: intentCommand("Explore") });
   pi.registerCommand("monofold:write", { description: "Create routed Markdown via natural-language handoff", handler: intentCommand("Write") });
   pi.registerCommand("monofold:config", { description: "Change Workspace configuration via natural-language handoff", handler: intentCommand("Config") });
   pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
+  pi.registerCommand("monofold:focus", { description: "Select the active Monofold focus preset from a TUI list", handler: focusCommand });
   pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
   pi.registerCommand("monofold:clear-unknown-path-allows", {
     description: `Clear remembered unknown-path allows stored in ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
     handler: clearUnknownPathAllowsCommand,
+  });
+
+  pi.registerShortcut(FOCUS_CYCLE_SHORTCUT, {
+    description: `${FOCUS_CYCLE_ACTION_ID}: cycle active Monofold focus preset forward`,
+    handler: cycleFocusForward,
   });
 
 

@@ -64,6 +64,8 @@ Optional `focusPresets` define tag-based focus targets for the control workspace
 
 Active focus (the selected preset id) lives in extension session memory only. It resets when Pi restarts. When `focusPresets` is non-empty, the first preset in YAML order becomes active at session start unless a later slice changes it.
 
+In the TUI, `/monofold:focus` selects Active Focus from a list of preset labels. The default shortcut `ctrl+shift+f` cycles Active Focus forward through `focusPresets` YAML order and the footer status shows `focus: <label> (n/N) ctrl+shift+f`. The MVP does not ship a backward focus shortcut.
+
 The example above includes a generic seed preset `control`. Add matching workspace tags in your own config when you adopt it.
 
 ## Commands
@@ -76,6 +78,7 @@ Human-facing commands accept natural-language arguments and hand off interpretat
 | `/monofold:write [request]` | Create routed Markdown outputs |
 | `/monofold:config [request]` | Add or change workspaces and project workspaces |
 | `/monofold:git [request]` | Run git status, commit, push, or commit+push workflows |
+| `/monofold:focus` | Select Active Focus from configured `focusPresets` |
 | `/monofold:guide` | Interactive guide for Explore, Write, Config, Git, init, and update flows |
 | `/monofold:init` | Create or update `.pi/monofold.yaml` with an interactive wizard |
 | `/monofold:update [request]` | Migrate/clean up legacy config and optionally hand a config-change request to the agent |

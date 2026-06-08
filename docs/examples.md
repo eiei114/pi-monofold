@@ -23,6 +23,15 @@ Natural-language arguments are interpreted by the Pi agent. These samples show t
 /monofold:config add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tag project,newapp
 ```
 
+## Focus presets
+
+```text
+/monofold:focus
+ctrl+shift+f
+```
+
+`/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+f` cycles Active Focus forward through `focusPresets` YAML order.
+
 ## Git
 
 ```text

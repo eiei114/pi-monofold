@@ -120,6 +120,59 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   activeFocusInitialized = true;
 }
 
+export type ActiveFocusPresetPosition = {
+  preset: FocusPreset;
+  index: number;
+  total: number;
+};
+
+export type FocusCycleResult = ActiveFocusPresetPosition & {
+  changed: boolean;
+};
+
+/** Returns the current active focus preset and YAML-order position, if any. */
+export function getActiveFocusPresetPosition(
+  focusPresets: FocusPreset[] | undefined,
+): ActiveFocusPresetPosition | null {
+  if (!focusPresets || focusPresets.length === 0) return null;
+  const activeId = getActiveFocusPresetId();
+  if (!activeId) return null;
+  const index = focusPresets.findIndex((preset) => preset.id === activeId);
+  if (index < 0) return null;
+  return { preset: focusPresets[index]!, index, total: focusPresets.length };
+}
+
+/** Selects a focus preset by the user-facing label returned from ctx.ui.select. */
+export function setActiveFocusPresetByLabel(
+  label: string,
+  focusPresets: FocusPreset[] | undefined,
+): ActiveFocusPresetPosition {
+  const presets = focusPresets ?? [];
+  const index = presets.findIndex((preset) => preset.label === label);
+  if (index < 0) throw new Error(`Unknown focus preset label: ${label}`);
+  const preset = presets[index]!;
+  setActiveFocusPresetId(preset.id, presets);
+  return { preset, index, total: presets.length };
+}
+
+/** Cycles the active focus preset forward in YAML order. */
+export function cycleActiveFocusPresetForward(focusPresets: FocusPreset[] | undefined): FocusCycleResult | null {
+  const presets = focusPresets ?? [];
+  if (presets.length === 0) {
+    clearActiveFocusPresetId();
+    return null;
+  }
+
+  ensureActiveFocusInitialized(presets);
+  const currentId = getActiveFocusPresetId();
+  const currentIndex = currentId ? presets.findIndex((preset) => preset.id === currentId) : -1;
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % presets.length;
+  const preset = presets[nextIndex]!;
+  const changed = presets.length > 1 && preset.id !== currentId;
+  setActiveFocusPresetId(preset.id, presets);
+  return { preset, index: nextIndex, total: presets.length, changed };
+}
+
 /** Clears the active focus preset for the current process/session. */
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;

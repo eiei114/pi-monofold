@@ -168,7 +168,7 @@ const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "context
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 const FOCUS_STATUS_ID = "monofold-focus";
-const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+f";
+const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+m";
 const FOCUS_CYCLE_ACTION_ID = "app.monofold.focus.cycleForward";
 
 function normalizeSlashes(value: string): string {

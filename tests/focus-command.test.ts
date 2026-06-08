@@ -86,14 +86,14 @@ workspaces:
     });
 
     assert.equal(getActiveFocusPresetId(), "docs");
-    assert.equal(statuses.get("monofold-focus"), "focus: Docs (2/2) ctrl+shift+f");
+    assert.equal(statuses.get("monofold-focus"), "focus: Docs (2/2) ctrl+shift+m");
     assert.ok(notifications.some((message) => message.includes("Active Focus set to Docs")));
   });
 
   it("registers only the forward focus shortcut", () => {
     const { shortcuts } = loadExtension();
-    assert.ok(shortcuts.has("ctrl+shift+f"));
-    assert.match(shortcuts.get("ctrl+shift+f")?.description ?? "", /app\.monofold\.focus\.cycleForward/);
+    assert.ok(shortcuts.has("ctrl+shift+m"));
+    assert.match(shortcuts.get("ctrl+shift+m")?.description ?? "", /app\.monofold\.focus\.cycleForward/);
     assert.equal(shortcuts.has("shift+ctrl+f"), false);
   });
 });

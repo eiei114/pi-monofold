@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `/monofold:focus`, the `ctrl+shift+f` forward focus-cycle shortcut, and a footer status indicator for the active focus preset.
+- Added `/monofold:focus`, the `ctrl+shift+m` forward focus-cycle shortcut, and a footer status indicator for the active focus preset.
 
 ## [0.3.3] - 2026-06-06
 

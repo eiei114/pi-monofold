@@ -86,7 +86,7 @@ pi -e npm:pi-monofold
 1. Install the extension (see [Install](#install)).
 2. In your control repository, create `.pi/monofold.yaml` with at least one workspace entry (or run `/monofold:init`).
 3. Start Pi in the control repository and run `/monofold:explore show the project workspaces`.
-4. Use `/monofold:focus` or `ctrl+shift+f` to switch focus presets when `focusPresets` are configured.
+4. Use `/monofold:focus` or `ctrl+shift+m` to switch focus presets when `focusPresets` are configured.
 5. Use `/monofold:write` for routed Markdown outputs and `/monofold:git` for guarded git workflows.
 
 Example command flows: [docs/examples.md](./docs/examples.md).
@@ -104,7 +104,7 @@ Example command flows: [docs/examples.md](./docs/examples.md).
 | `/monofold:init` | Create or update `.pi/monofold.yaml` |
 | `/monofold:update` | Migrate legacy config and optionally request config edits |
 
-Default focus shortcut: `ctrl+shift+f` cycles Active Focus forward through `focusPresets` YAML order. No backward focus shortcut ships in the MVP.
+Default focus shortcut: `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order. No backward focus shortcut ships in the MVP.
 
 Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Full reference: [docs/usage.md](./docs/usage.md).
 

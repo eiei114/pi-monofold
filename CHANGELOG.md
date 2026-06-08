@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-09
+
+### Changed
+
+- Marked the safe-read behavior changes as a minor release boundary: `monofold_read` file reads now default to metadata plus a bounded preview instead of full file content.
+- Documented capped search/tree output with truncation markers so exploratory reads stay safe for chat history.
+- Noted legacy slash-command parity for the same safe file preview and capped search/tree behavior.
+
 ## [0.4.0] - 2026-06-08
 
 ### Added

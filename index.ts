@@ -12,6 +12,7 @@ import {
   findFocusPresetById,
   getActiveFocusPresetId,
   getActiveFocusPresetPosition,
+  matchesFocusTarget,
   parseFocusPresets,
   setActiveFocusPresetByLabel,
   setActiveFocusPresetId,
@@ -170,6 +171,20 @@ const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 const FOCUS_STATUS_ID = "monofold-focus";
 const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+m";
 const FOCUS_CYCLE_ACTION_ID = "app.monofold.focus.cycleForward";
+export const FOCUS_CONTEXT_MAX_FILES = 6;
+export const FOCUS_CONTEXT_MAX_CHARS_PER_FILE = 6_000;
+export const FOCUS_CONTEXT_MAX_TOTAL_CHARS = 12_000;
+const FOCUS_CONTEXT_TRUNCATION_MARKER = "… [truncated]";
+
+type ActiveFocusWorkspace = {
+  workspace: ResolvedWorkspace;
+  targetIndex: number;
+};
+
+type FocusContextInjection = {
+  text: string;
+  totalCapReached: boolean;
+};
 
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
@@ -921,6 +936,42 @@ function formatWorkspaceLabel(workspace: ResolvedWorkspace): string {
   return `${workspace.targetId} ${displayName}[${workspace.tags.join(", ")}] ${workspace.displayPath}${parent}`;
 }
 
+function formatCollapsedWorkspaceLine(workspace: ResolvedWorkspace): string {
+  const label = workspace.name ?? "(unnamed)";
+  return `${workspace.targetId} ${label} [${workspace.tags.join(", ")}] ${workspace.displayPath}`;
+}
+
+function getActiveFocusPreset(loaded: LoadedConfig): FocusPreset | undefined {
+  const activeId = getActiveFocusPresetId();
+  return activeId ? findFocusPresetById(loaded.raw.focusPresets, activeId) : undefined;
+}
+
+function getActiveFocusWorkspaces(loaded: LoadedConfig, preset: FocusPreset): ActiveFocusWorkspace[] {
+  const active: ActiveFocusWorkspace[] = [];
+  const seenTargets = new Set<string>();
+  for (let targetIndex = 0; targetIndex < preset.targets.length; targetIndex += 1) {
+    const target = preset.targets[targetIndex]!;
+    for (const workspace of loaded.workspaces) {
+      if (seenTargets.has(workspace.targetId)) continue;
+      if (!matchesFocusTarget(workspace, target.targetTags)) continue;
+      seenTargets.add(workspace.targetId);
+      active.push({ workspace, targetIndex });
+    }
+  }
+  return active;
+}
+
+function truncateWithMarker(value: string, maxChars: number): { text: string; truncated: boolean } {
+  if (value.length <= maxChars) return { text: value, truncated: false };
+  if (maxChars <= FOCUS_CONTEXT_TRUNCATION_MARKER.length) {
+    return { text: FOCUS_CONTEXT_TRUNCATION_MARKER.slice(0, maxChars), truncated: true };
+  }
+  return {
+    text: value.slice(0, maxChars - FOCUS_CONTEXT_TRUNCATION_MARKER.length) + FOCUS_CONTEXT_TRUNCATION_MARKER,
+    truncated: true,
+  };
+}
+
 function relativePath(workspace: ResolvedWorkspace, inputPath: string): string {
   assertWorkspaceInternalRelative("path", inputPath);
   return path.join(workspace.resolvedPath, inputPath);
@@ -939,20 +990,102 @@ async function gitRoot(workspace: ResolvedWorkspace): Promise<string | undefined
   return undefined;
 }
 
+async function buildFullWorkspaceManifestEntry(workspace: ResolvedWorkspace, suffix = ""): Promise<string> {
+  const git = await gitSummary(workspace).catch((error) => ({ isGit: false, status: `git status error: ${String(error)}` }));
+  return (
+    `- ${formatWorkspaceLabel(workspace)}${suffix}\n` +
+    `  capabilities: ${workspace.capabilities.join(", ")}\n` +
+    `  routes: ${Object.keys(workspace.normalizedRoutes).join(", ") || "none"}\n` +
+    `  contextFiles: ${workspace.effectiveContextFiles.join(", ") || "none"}\n` +
+    `  git: ${git.isGit ? git.status : "not a git repository"}`
+  );
+}
+
 async function buildManifest(loaded: LoadedConfig): Promise<string> {
   const lines = ["Pi Monofold Manifest:"];
-  for (const workspace of loaded.workspaces) {
-    const git = await gitSummary(workspace).catch((error) => ({ isGit: false, status: `git status error: ${String(error)}` }));
-    lines.push(
-      `- ${formatWorkspaceLabel(workspace)}\n` +
-        `  capabilities: ${workspace.capabilities.join(", ")}\n` +
-        `  routes: ${Object.keys(workspace.normalizedRoutes).join(", ") || "none"}\n` +
-        `  contextFiles: ${workspace.effectiveContextFiles.join(", ") || "none"}\n` +
-        `  git: ${git.isGit ? git.status : "not a git repository"}`,
-    );
+  const activePreset = getActiveFocusPreset(loaded);
+  if (activePreset) {
+    const activeWorkspaces = getActiveFocusWorkspaces(loaded, activePreset);
+    const activeTargetIds = new Set(activeWorkspaces.map(({ workspace }) => workspace.targetId));
+    if (activeWorkspaces.length > 0) {
+      lines.push(`Active Focus: ${activePreset.label} (${activePreset.id})`);
+      for (const { workspace } of activeWorkspaces) {
+        lines.push(await buildFullWorkspaceManifestEntry(workspace, " (active)"));
+      }
+      const collapsed = loaded.workspaces.filter((workspace) => !activeTargetIds.has(workspace.targetId));
+      if (collapsed.length > 0) {
+        lines.push("Non-active Workspace Targets (collapsed):");
+        for (const workspace of collapsed) lines.push(`- ${formatCollapsedWorkspaceLine(workspace)}`);
+      }
+      lines.push("Use monofold_* tools for cross-workspace operations. Do not guess output paths when a route exists.");
+      return lines.join("\n");
+    }
   }
+  for (const workspace of loaded.workspaces) lines.push(await buildFullWorkspaceManifestEntry(workspace));
   lines.push("Use monofold_* tools for cross-workspace operations. Do not guess output paths when a route exists.");
   return lines.join("\n");
+}
+
+async function buildFocusContextInjection(loaded: LoadedConfig, preset: FocusPreset): Promise<FocusContextInjection> {
+  const activeWorkspaces = getActiveFocusWorkspaces(loaded, preset);
+  const lines = ["## Focus Context Injection", "", `Active Focus: ${preset.label} (${preset.id})`];
+  const notices: string[] = [];
+  const seenFiles = new Set<string>();
+  let injectedFileCount = 0;
+  let totalInjectedChars = 0;
+  let skippedByFileCap = 0;
+  let skippedByTotalCap = 0;
+  let totalCapReached = false;
+
+  for (const { workspace } of activeWorkspaces) {
+    for (const contextFile of workspace.effectiveContextFiles) {
+      const absolutePath = relativePath(workspace, contextFile);
+      const dedupeKey = normalizeGuardPath(absolutePath);
+      if (seenFiles.has(dedupeKey)) continue;
+      seenFiles.add(dedupeKey);
+
+      if (injectedFileCount >= FOCUS_CONTEXT_MAX_FILES) {
+        skippedByFileCap += 1;
+        continue;
+      }
+
+      let raw: string;
+      try {
+        raw = await readFile(absolutePath, "utf8");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notices.push(`Skipped unreadable context file ${workspace.targetId}:${contextFile} (${message})`);
+        continue;
+      }
+
+      const perFile = truncateWithMarker(raw, FOCUS_CONTEXT_MAX_CHARS_PER_FILE);
+      if (perFile.truncated) notices.push(`Truncated ${workspace.targetId}:${contextFile} to ${FOCUS_CONTEXT_MAX_CHARS_PER_FILE} characters`);
+
+      if (totalInjectedChars + perFile.text.length > FOCUS_CONTEXT_MAX_TOTAL_CHARS) {
+        skippedByTotalCap += 1;
+        totalCapReached = true;
+        continue;
+      }
+
+      injectedFileCount += 1;
+      totalInjectedChars += perFile.text.length;
+      lines.push(
+        "",
+        `### ${workspace.targetId} ${workspace.name ?? "(unnamed)"}: ${contextFile}`,
+        `Workspace Target: ${formatWorkspaceLabel(workspace)}`,
+        "```text",
+        perFile.text,
+        "```",
+      );
+    }
+  }
+
+  if (skippedByFileCap > 0) notices.push(`Skipped ${skippedByFileCap} context file(s) after the ${FOCUS_CONTEXT_MAX_FILES}-file cap`);
+  if (skippedByTotalCap > 0) notices.push(`Skipped ${skippedByTotalCap} context file(s) after the ${FOCUS_CONTEXT_MAX_TOTAL_CHARS}-character total cap`);
+  if (injectedFileCount === 0) notices.push("No focus context files were injected for the active preset");
+  if (notices.length > 0) lines.splice(3, 0, "", "Notices:", ...notices.map((notice) => `- ${notice}`));
+
+  return { text: lines.join("\n"), totalCapReached };
 }
 
 function slugify(title: string): string {
@@ -1079,7 +1212,16 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);
+      ensureActiveFocusInitialized(loaded.raw.focusPresets);
       const manifest = await buildManifest(loaded);
+      const activePreset = getActiveFocusPreset(loaded);
+      const focusInjection = activePreset ? await buildFocusContextInjection(loaded, activePreset) : undefined;
+      if (focusInjection?.totalCapReached && ctx.hasUI) {
+        ctx.ui.notify(
+          `Focus Context Injection reached the ${FOCUS_CONTEXT_MAX_TOTAL_CHARS}-character total cap; skipped remaining context files.`,
+          "warning",
+        );
+      }
       return {
         systemPrompt:
           _event.systemPrompt +
@@ -1088,6 +1230,9 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
 ## Pi Monofold
 
 ${manifest}
+${focusInjection ? `
+
+${focusInjection.text}` : ""}
 `,
       };
     } catch {

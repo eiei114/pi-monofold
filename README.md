@@ -106,7 +106,7 @@ Example command flows: [docs/examples.md](./docs/examples.md).
 
 Default focus shortcut: `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order. No backward focus shortcut ships in the MVP.
 
-When Active Focus is set, Pi Monofold injects the active preset's `contextFiles` into each agent turn under **Focus Context Injection** and recomposes the manifest so active Workspace Targets are shown first while non-active targets are collapsed to one-line summaries. The MVP uses provisional context-injection caps that are intentionally temporary and exposed as constants for future tuning:
+When Active Focus is set, Pi Monofold injects the active preset's `contextFiles` into each agent turn under **Focus Context Injection** and recomposes the manifest so active Workspace Targets are shown first while non-active targets are collapsed to one-line summaries. Tag-based target inference in `monofold_read`, `monofold_write`, and `monofold_git` also prefers Workspace Targets that belong to the active preset when a tag query would otherwise match multiple candidates; explicit `targetId` / workspace name selectors and uniquely matching targets are unchanged. If multiple in-focus targets still tie, the existing workspace selection flow applies. The MVP uses provisional context-injection caps that are intentionally temporary and exposed as constants for future tuning:
 
 - Max **6** context files per active preset.
 - Max **6,000** characters per file, with `… [truncated]` appended when a file is cut.

@@ -184,3 +184,31 @@ export function resetActiveFocusSessionState(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = false;
 }
+
+export type TagBasedTargetInput = {
+  targetTags?: string[];
+  targetId?: string;
+  targetName?: string;
+  workspaceName?: string;
+  workspaceIndex?: number;
+};
+
+/** Returns true when workspace resolution relies on tag query without an explicit selector. */
+export function isTagBasedTargetInference(target: TagBasedTargetInput): boolean {
+  if (!target.targetTags?.length) return false;
+  if (target.targetId) return false;
+  const targetName = target.targetName ?? target.workspaceName;
+  if (targetName) return false;
+  if (target.workspaceIndex !== undefined) return false;
+  return true;
+}
+
+/** Narrows ambiguous tag matches to active-focus targets when at least one in-focus candidate exists. */
+export function biasMatchesTowardActiveFocus<T extends { targetId: string }>(
+  matches: T[],
+  activeTargetIds: ReadonlySet<string>,
+): T[] {
+  if (matches.length <= 1 || activeTargetIds.size === 0) return matches;
+  const inFocus = matches.filter((match) => activeTargetIds.has(match.targetId));
+  return inFocus.length > 0 ? inFocus : matches;
+}

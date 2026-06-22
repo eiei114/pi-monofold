@@ -12,6 +12,8 @@ import {
   findFocusPresetById,
   getActiveFocusPresetId,
   getActiveFocusPresetPosition,
+  biasMatchesTowardActiveFocus,
+  isTagBasedTargetInference,
   matchesFocusTarget,
   parseFocusPresets,
   setActiveFocusPresetByLabel,
@@ -917,9 +919,20 @@ function notifyNoFocusPresets(ctx: ExtensionContext | ExtensionCommandContext, p
   if (pi) sendCommandOutput(pi, "monofold:focus", message, { focusPresets: 0 });
 }
 
+function biasWorkspaceMatchesWithActiveFocus(loaded: LoadedConfig, matches: ResolvedWorkspace[]): ResolvedWorkspace[] {
+  const activePreset = getActiveFocusPreset(loaded);
+  if (!activePreset) return matches;
+  const activeTargetIds = new Set(getActiveFocusWorkspaces(loaded, activePreset).map(({ workspace }) => workspace.targetId));
+  return biasMatchesTowardActiveFocus(matches, activeTargetIds);
+}
+
 async function resolveWorkspace(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
-  const matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
+  ensureActiveFocusInitialized(loaded.raw.focusPresets);
+  let matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
   if (matches.length === 0) throw new Error(`No workspace matches target: ${JSON.stringify(target)}`);
+  if (matches.length > 1 && isTagBasedTargetInference(target)) {
+    matches = biasWorkspaceMatchesWithActiveFocus(loaded, matches);
+  }
   if (matches.length === 1) return matches[0];
   if (!ctx.hasUI) {
     throw new Error(`Multiple workspaces match target in non-interactive mode: ${matches.map(formatWorkspaceLabel).join(", ")}`);

@@ -32,6 +32,18 @@ ctrl+shift+m
 
 `/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order.
 
+Example `focusSkills` for a control + project/dev pair:
+
+```yaml
+focusPresets:
+  - id: pi-monofold
+    label: Pi Monofold
+    focusSkills: [commit, pr-review]
+    targets:
+      - targetTags: [project, pi-monofold]
+      - targetTags: [development, pi-monofold]
+```
+
 ## Git
 
 ```text

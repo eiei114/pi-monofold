@@ -21,6 +21,10 @@ import {
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
 import {
+  applyFocusSkillsToSystemPrompt,
+  warnMissingFocusSkills,
+} from "./focus-skills.js";
+import {
   buildMonofoldTree,
   readMonofoldFile,
   runMonofoldSearch,
@@ -1235,9 +1239,22 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
           "warning",
         );
       }
+      if (activePreset && ctx.hasUI) {
+        warnMissingFocusSkills(
+          activePreset.id,
+          activePreset.focusSkills,
+          _event.systemPromptOptions?.skills,
+          (message) => ctx.ui.notify(message, "warning"),
+        );
+      }
+      const baseSystemPrompt = applyFocusSkillsToSystemPrompt(
+        _event.systemPrompt,
+        _event.systemPromptOptions?.skills,
+        activePreset?.focusSkills,
+      );
       return {
         systemPrompt:
-          _event.systemPrompt +
+          baseSystemPrompt +
           `
 
 ## Pi Monofold

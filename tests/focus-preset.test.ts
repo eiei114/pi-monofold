@@ -54,6 +54,27 @@ describe("parseFocusPresets", () => {
     );
   });
 
+  it("accepts optional focusSkills", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        {
+          id: "control",
+          label: "Control",
+          focusSkills: ["commit", "review"],
+          targets: [{ targetTags: ["control"] }],
+        },
+      ]),
+      [
+        {
+          id: "control",
+          label: "Control",
+          focusSkills: ["commit", "review"],
+          targets: [{ targetTags: ["control"] }],
+        },
+      ],
+    );
+  });
+
   it("rejects unknown preset keys", () => {
     assert.throws(
       () =>
@@ -61,11 +82,11 @@ describe("parseFocusPresets", () => {
           {
             id: "control",
             label: "Control",
-            focusSkills: ["ignored"],
+            extra: true,
             targets: [{ targetTags: ["control"] }],
           },
         ]),
-      /unknown key: focusSkills/,
+      /unknown key: extra/,
     );
   });
 

@@ -11,7 +11,7 @@
   },
   "description": "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
   "type": "module",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "pi": {
     "extensions": [
       "./index.ts"
@@ -25,6 +25,7 @@
     "unknown-path-allows.ts",
     "file-read-preview.ts",
     "focus-preset.ts",
+    "focus-skills.ts",
     "monofold-read-ops.ts",
     "read-caps.ts",
     "validation.ts"

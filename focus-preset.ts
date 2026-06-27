@@ -1,3 +1,4 @@
+import { parseFocusSkills, resetFocusSkillsWarningState } from "./focus-skills.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 export type FocusPresetTarget = {
@@ -8,13 +9,14 @@ export type FocusPreset = {
   id: string;
   label: string;
   targets: FocusPresetTarget[];
+  focusSkills?: string[];
 };
 
 export type FocusMatchableWorkspace = {
   tags: string[];
 };
 
-const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets"]);
+const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills"]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
 /** Parses and validates focus preset configuration from YAML/JSON input. */
@@ -49,9 +51,15 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
       }
       targets.push({ targetTags });
     }
+    const focusSkills = parseFocusSkills(itemLabel, item.focusSkills);
     if (seenIds.has(item.id)) throw new Error(`${label} has duplicate preset id: ${item.id}`);
     seenIds.add(item.id);
-    presets.push({ id: item.id, label: item.label, targets });
+    presets.push({
+      id: item.id,
+      label: item.label,
+      targets,
+      ...(focusSkills !== undefined ? { focusSkills } : {}),
+    });
   }
   return presets;
 }
@@ -118,6 +126,7 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   }
   activeFocusPresetId = id;
   activeFocusInitialized = true;
+  resetFocusSkillsWarningState();
 }
 
 export type ActiveFocusPresetPosition = {
@@ -177,12 +186,14 @@ export function cycleActiveFocusPresetForward(focusPresets: FocusPreset[] | unde
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = true;
+  resetFocusSkillsWarningState();
 }
 
 /** Resets in-memory session state (for tests and process restart). */
 export function resetActiveFocusSessionState(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = false;
+  resetFocusSkillsWarningState();
 }
 
 export type TagBasedTargetInput = {

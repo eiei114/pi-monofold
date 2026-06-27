@@ -22,8 +22,15 @@ defaults:
 focusPresets:
   - id: control
     label: Control workspace focus
+    focusSkills: [commit]
     targets:
       - targetTags: [control]
+  - id: pi-monofold
+    label: Pi Monofold project + dev
+    focusSkills: [commit, pr-review]
+    targets:
+      - targetTags: [project, pi-monofold]
+      - targetTags: [development, pi-monofold]
 
 workspaces:
   - name: "Product docs"
@@ -67,6 +74,15 @@ Active focus (the selected preset id) lives in extension session memory only. It
 In the TUI, `/monofold:focus` selects Active Focus from a list of preset labels. The default shortcut `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order and the footer status shows `focus: <label> (n/N) ctrl+shift+m`. The MVP does not ship a backward focus shortcut.
 
 The example above includes a generic seed preset `control`. Add matching workspace tags in your own config when you adopt it.
+
+### focusSkills auto-load
+
+Optional `focusSkills` on a preset declares up to six Pi skill names to expose automatically while that preset is Active Focus.
+
+- Use `focusSkills` for a small, stable set of skills you always want for a control/project pair (for example commit helpers for a vault + OSS dev preset).
+- Pi still discovers skills through the normal inventory; Monofold only filters the system prompt to the declared names for the active preset.
+- Unknown names produce a warning with the missing skill name. Fix the name, install the skill package, or reload Pi after changes.
+- Prefer Pi Skill Shiori (`shiori:*`) or `/skill:name` when you need task-triggered discovery across the full catalog instead of a fixed preset bundle.
 
 ## Commands
 

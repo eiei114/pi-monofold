@@ -1,3 +1,4 @@
+import { type MonofoldRouteType, parseDefaultRouteOverride } from "./focus-route-override.js";
 import { parseFocusSkills, resetFocusSkillsWarningState } from "./focus-skills.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
@@ -10,13 +11,14 @@ export type FocusPreset = {
   label: string;
   targets: FocusPresetTarget[];
   focusSkills?: string[];
+  defaultRouteOverride?: MonofoldRouteType;
 };
 
 export type FocusMatchableWorkspace = {
   tags: string[];
 };
 
-const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills"]);
+const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills", "defaultRouteOverride"]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
 /** Parses and validates focus preset configuration from YAML/JSON input. */
@@ -52,6 +54,7 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
       targets.push({ targetTags });
     }
     const focusSkills = parseFocusSkills(itemLabel, item.focusSkills);
+    const defaultRouteOverride = parseDefaultRouteOverride(itemLabel, item.defaultRouteOverride);
     if (seenIds.has(item.id)) throw new Error(`${label} has duplicate preset id: ${item.id}`);
     seenIds.add(item.id);
     presets.push({
@@ -59,6 +62,7 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
       label: item.label,
       targets,
       ...(focusSkills !== undefined ? { focusSkills } : {}),
+      ...(defaultRouteOverride !== undefined ? { defaultRouteOverride } : {}),
     });
   }
   return presets;

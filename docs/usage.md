@@ -22,11 +22,13 @@ defaults:
 focusPresets:
   - id: control
     label: Control workspace focus
+    defaultRouteOverride: design
     focusSkills: [commit]
     targets:
       - targetTags: [control]
   - id: pi-monofold
     label: Pi Monofold project + dev
+    defaultRouteOverride: progress
     focusSkills: [commit, pr-review]
     targets:
       - targetTags: [project, pi-monofold]
@@ -83,6 +85,16 @@ Optional `focusSkills` on a preset declares up to six Pi skill names to expose a
 - Pi still discovers skills through the normal inventory; Monofold only filters the system prompt to the declared names for the active preset.
 - Unknown names produce a warning with the missing skill name. Fix the name, install the skill package, or reload Pi after changes.
 - Prefer Pi Skill Shiori (`shiori:*`) or `/skill:name` when you need task-triggered discovery across the full catalog instead of a fixed preset bundle.
+
+### defaultRouteOverride
+
+Optional `defaultRouteOverride` on a preset biases Monofold write flows toward a configured route type while that preset is Active Focus.
+
+- Valid values: `default`, `prd`, `design`, `progress`, `issue`, `research`, `decision`.
+- Unknown values fail config validation with an actionable error.
+- Precedence: explicit `routeType` on `monofold_write` or `--route` on `/monofold:write` always wins; when omitted, Active Focus `defaultRouteOverride` is used; otherwise Monofold falls back to `default`.
+- The footer status shows `route:<type>` when the active preset declares an override.
+- Use `design` or `progress` for control/docs presets and `progress` or `research` for project/dev presets so write intent defaults match the work mode without hiding explicit route selection.
 
 ## Commands
 

@@ -54,6 +54,42 @@ describe("parseFocusPresets", () => {
     );
   });
 
+  it("accepts optional defaultRouteOverride", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        {
+          id: "docs",
+          label: "Docs",
+          defaultRouteOverride: "progress",
+          targets: [{ targetTags: ["docs"] }],
+        },
+      ]),
+      [
+        {
+          id: "docs",
+          label: "Docs",
+          defaultRouteOverride: "progress",
+          targets: [{ targetTags: ["docs"] }],
+        },
+      ],
+    );
+  });
+
+  it("rejects unknown defaultRouteOverride values", () => {
+    assert.throws(
+      () =>
+        parseFocusPresets([
+          {
+            id: "docs",
+            label: "Docs",
+            defaultRouteOverride: "notes",
+            targets: [{ targetTags: ["docs"] }],
+          },
+        ]),
+      /must be one of/,
+    );
+  });
+
   it("accepts optional focusSkills", () => {
     assert.deepEqual(
       parseFocusPresets([

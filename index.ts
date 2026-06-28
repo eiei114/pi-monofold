@@ -21,6 +21,10 @@ import {
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
 import {
+  resolveWriteRouteType,
+  type MonofoldRouteType,
+} from "./focus-route-override.js";
+import {
   applyFocusSkillsToSystemPrompt,
   warnMissingFocusSkills,
 } from "./focus-skills.js";
@@ -41,7 +45,7 @@ import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./valid
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
 type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
 type IntentCategory = "Explore" | "Write" | "Config" | "Git";
-type RouteType = "default" | "prd" | "design" | "progress" | "issue" | "research" | "decision";
+type RouteType = MonofoldRouteType;
 
 type RouteConfig = {
   path: string;
@@ -892,7 +896,11 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
 }
 
 function formatFocusStatus(position: ActiveFocusPresetPosition): string {
-  return `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT}`;
+  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT}`;
+  if (position.preset.defaultRouteOverride) {
+    return `${base} route:${position.preset.defaultRouteOverride}`;
+  }
+  return base;
 }
 
 function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
@@ -1026,6 +1034,9 @@ async function buildManifest(loaded: LoadedConfig): Promise<string> {
     const activeTargetIds = new Set(activeWorkspaces.map(({ workspace }) => workspace.targetId));
     if (activeWorkspaces.length > 0) {
       lines.push(`Active Focus: ${activePreset.label} (${activePreset.id})`);
+      if (activePreset.defaultRouteOverride) {
+        lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
+      }
       for (const { workspace } of activeWorkspaces) {
         lines.push(await buildFullWorkspaceManifestEntry(workspace, " (active)"));
       }
@@ -1046,6 +1057,9 @@ async function buildManifest(loaded: LoadedConfig): Promise<string> {
 async function buildFocusContextInjection(loaded: LoadedConfig, preset: FocusPreset): Promise<FocusContextInjection> {
   const activeWorkspaces = getActiveFocusWorkspaces(loaded, preset);
   const lines = ["## Focus Context Injection", "", `Active Focus: ${preset.label} (${preset.id})`];
+  if (preset.defaultRouteOverride) {
+    lines.push(`Default write route override: ${preset.defaultRouteOverride} (explicit routeType/--route still wins)`);
+  }
   const notices: string[] = [];
   const seenFiles = new Set<string>();
   let injectedFileCount = 0;
@@ -1386,7 +1400,7 @@ ${focusInjection.text}` : ""}
     label: "Workspace Write",
     description: "Write a Markdown document to a routed Workspace destination using routeType, title, body, filename, and metadata.",
     parameters: Type.Object({
-      routeType: Type.String({ description: "default, prd, design, progress, issue, research, or decision" }),
+      routeType: Type.Optional(Type.String({ description: "default, prd, design, progress, issue, research, or decision; omitted uses active Focus defaultRouteOverride or default" })),
       title: Type.String(),
       body: Type.String(),
       filename: Type.Optional(Type.String()),
@@ -1397,9 +1411,9 @@ ${focusInjection.text}` : ""}
       workspaceName: Type.Optional(Type.String()),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const routeType = params.routeType as RouteType;
-      if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown routeType: ${params.routeType}`);
       const loaded = await loadConfig(ctx.cwd);
+      const activePreset = getActiveFocusPreset(loaded);
+      const routeType = resolveWriteRouteType(params.routeType, activePreset?.defaultRouteOverride);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
         targetName: params.targetName,
@@ -1613,14 +1627,15 @@ ${focusInjection.text}` : ""}
   const writeCommand = async (args: string, ctx: ExtensionCommandContext) => {
     try {
       const parsed = parseCommandArgs(args);
-      const routeType = (stringFlag(parsed.flags, "route", "r") ?? parsed.positional[0] ?? "default") as RouteType;
-      if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown routeType: ${routeType}`);
       const title = stringFlag(parsed.flags, "title", "t");
       const body = stringFlag(parsed.flags, "body", "b");
       if (!title) throw new Error("--title is required");
       if (!body) throw new Error("--body is required");
 
       const loaded = await loadConfig(ctx.cwd);
+      const activePreset = getActiveFocusPreset(loaded);
+      const explicitRoute = stringFlag(parsed.flags, "route", "r") ?? parsed.positional[0];
+      const routeType = resolveWriteRouteType(explicitRoute, activePreset?.defaultRouteOverride);
       const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, ["writeDocs"]));
       const route = workspace.normalizedRoutes[routeType] ?? workspace.normalizedRoutes.default;
       if (!route) throw new Error(`Workspace has no route for ${routeType} and no default route`);

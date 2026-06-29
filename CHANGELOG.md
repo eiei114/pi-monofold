@@ -1,3 +1,9 @@
+## Unreleased
+
+### Added
+
+- `monofold_list` now includes a compact **Active Focus Health** block (preset, route override, unresolved targets, and validation warnings) as the first-line Focus status surface.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

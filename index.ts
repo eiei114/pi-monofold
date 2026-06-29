@@ -27,6 +27,7 @@ import {
 } from "./focus-route-override.js";
 import {
   applyFocusSkillsToSystemPrompt,
+  findMissingFocusSkills,
   warnMissingFocusSkills,
 } from "./focus-skills.js";
 import {
@@ -1029,17 +1030,45 @@ async function buildFullWorkspaceManifestEntry(workspace: ResolvedWorkspace, suf
   );
 }
 
-async function buildManifest(loaded: LoadedConfig): Promise<string> {
+async function buildManifest(
+  loaded: LoadedConfig,
+  options?: { skills?: import("@earendil-works/pi-coding-agent").Skill[] },
+): Promise<string> {
+  ensureActiveFocusInitialized(loaded.raw.focusPresets);
   const lines = ["Pi Monofold Manifest:"];
   const activePreset = getActiveFocusPreset(loaded);
+  const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
+  if (activePreset && position) {
+    lines.push(`Active Focus: ${activePreset.label} (${activePreset.id}, ${position.index + 1}/${position.total})`);
+    if (activePreset.defaultRouteOverride) {
+      lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
+    }
+    const missingTargets = activePreset.targets.filter(
+      (target) => !loaded.workspaces.some((workspace) => matchesFocusTarget(workspace, target.targetTags)),
+    );
+    const missingSkills = options?.skills ? findMissingFocusSkills(activePreset.focusSkills, options.skills) : [];
+    const warnings = [
+      ...missingTargets.map(
+        (target) => `Focus target [${target.targetTags.join(", ")}] matches no configured workspace`,
+      ),
+      ...missingSkills.map((name) => `Focus skill "${name}" was not found in Pi's discovered inventory`),
+    ];
+    if (warnings.length > 0) {
+      lines.push("Focus warnings:");
+      for (const warning of warnings) lines.push(`- ${warning}`);
+    } else {
+      lines.push("Focus health: ok");
+    }
+    lines.push("");
+  } else {
+    const health = loaded.raw.focusPresets && loaded.raw.focusPresets.length > 0 ? "no Active Focus selected" : "no focusPresets configured";
+    lines.push("Active Focus: none", `Focus health: ${health}`, "");
+  }
+
   if (activePreset) {
     const activeWorkspaces = getActiveFocusWorkspaces(loaded, activePreset);
     const activeTargetIds = new Set(activeWorkspaces.map(({ workspace }) => workspace.targetId));
     if (activeWorkspaces.length > 0) {
-      lines.push(`Active Focus: ${activePreset.label} (${activePreset.id})`);
-      if (activePreset.defaultRouteOverride) {
-        lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
-      }
       for (const { workspace } of activeWorkspaces) {
         lines.push(await buildFullWorkspaceManifestEntry(workspace, " (active)"));
       }
@@ -1247,7 +1276,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
     try {
       const loaded = await loadConfig(ctx.cwd);
       ensureActiveFocusInitialized(loaded.raw.focusPresets);
-      const manifest = await buildManifest(loaded);
+      const manifest = await buildManifest(loaded, { skills: _event.systemPromptOptions?.skills });
       const activePreset = getActiveFocusPreset(loaded);
       const focusInjection = activePreset ? await buildFocusContextInjection(loaded, activePreset) : undefined;
       if (focusInjection?.totalCapReached && ctx.hasUI) {

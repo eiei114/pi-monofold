@@ -113,7 +113,7 @@ When Active Focus is set, Pi Monofold injects the active preset's `contextFiles`
 - Max **6,000** characters per file, with `… [truncated]` appended when a file is cut.
 - Max **12,000** injected file-content characters per turn; remaining files are skipped and a warning is surfaced once for that turn.
 
-Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Full reference: [docs/usage.md](./docs/usage.md).
+Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Use `monofold_list` as the first-line Active Focus health check (preset, route override, unresolved targets, and warnings). Full reference: [docs/usage.md](./docs/usage.md).
 
 ## Safe read defaults
 

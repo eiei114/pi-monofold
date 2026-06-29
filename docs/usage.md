@@ -99,8 +99,8 @@ Run `monofold_list` (or rely on the injected manifest) to inspect Focus health b
 
 - current Active Focus preset and YAML position
 - `defaultRouteOverride` when declared
-- unresolved `targetTags` entries that match no workspace
-- validation warnings such as zero-match targets or missing `focusSkills` names (when Pi skill inventory is available)
+- invalid `targetTags`, duplicate selectors, or capability/route mismatches fail config validation before Focus activation
+- runtime health warnings such as missing `focusSkills` names (when Pi skill inventory is available)
 
 The health block stays compact and does not dump raw internal state.
 - Precedence: explicit `routeType` on `monofold_write` or `--route` on `/monofold:write` always wins; when omitted, Active Focus `defaultRouteOverride` is used; otherwise Monofold falls back to `default`.

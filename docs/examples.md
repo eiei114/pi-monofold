@@ -32,6 +32,8 @@ ctrl+shift+m
 shift+ctrl+f
 ```
 
+Use `monofold_list` first to inspect Active Focus health (preset, route override, unresolved targets, and warnings).
+
 `/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward and `shift+ctrl+f` (or `/monofold:focus-prev`) cycles backward through `focusPresets` YAML order.
 
 Example `focusSkills` and `defaultRouteOverride` for a control + project/dev pair:

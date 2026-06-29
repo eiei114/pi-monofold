@@ -163,6 +163,75 @@ workspaces:
     });
 
     assert.match(result.content[0]!.text, /Default write route override: progress/);
+    assert.match(result.content[0]!.text, /Focus health: ok/);
     assert.equal(getActiveFocusPresetId(), "docs");
+  });
+
+  it("shows no-focus health in monofold_list when no focusPresets exist", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-no-focus-"));
+    await mkdir(path.join(root, ".pi"), { recursive: true });
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    await writeFile(
+      path.join(root, ".pi", "monofold.yaml"),
+      `version: 1
+workspaces:
+  - name: Docs
+    path: ./docs
+    tags: [docs]
+    capabilities: [read, writeDocs]
+    routes:
+      default: .
+`,
+      "utf8",
+    );
+    const { tools } = loadExtension();
+    const list = tools.get("monofold_list");
+    assert.ok(list);
+
+    const result = await list.execute("1", {}, undefined, undefined, {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, select: async () => undefined },
+    });
+
+    assert.match(result.content[0]!.text, /Active Focus: none/);
+    assert.match(result.content[0]!.text, /Focus health: no focusPresets configured/);
+  });
+
+  it("shows focus warnings for unresolved active focus targets in monofold_list", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-focus-warning-"));
+    await mkdir(path.join(root, ".pi"), { recursive: true });
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    await writeFile(
+      path.join(root, ".pi", "monofold.yaml"),
+      `version: 1
+focusPresets:
+  - id: missing
+    label: Missing Target
+    targets:
+      - targetTags: [production]
+workspaces:
+  - name: Docs
+    path: ./docs
+    tags: [docs]
+    capabilities: [read, writeDocs]
+    routes:
+      default: .
+`,
+      "utf8",
+    );
+    const { tools } = loadExtension();
+    const list = tools.get("monofold_list");
+    assert.ok(list);
+
+    const result = await list.execute("1", {}, undefined, undefined, {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, select: async () => undefined },
+    });
+
+    assert.match(result.content[0]!.text, /Active Focus: Missing Target \(missing, 1\/1\)/);
+    assert.match(result.content[0]!.text, /Focus warnings:/);
+    assert.match(result.content[0]!.text, /Focus target \[production\] matches no configured workspace/);
   });
 });

@@ -92,6 +92,17 @@ Optional `defaultRouteOverride` on a preset biases Monofold write flows toward a
 
 - Valid values: `default`, `prd`, `design`, `progress`, `issue`, `research`, `decision`.
 - Unknown values fail config validation with an actionable error.
+
+### Active Focus health in monofold_list
+
+Run `monofold_list` (or rely on the injected manifest) to inspect Focus health before deeper debugging:
+
+- current Active Focus preset and YAML position
+- `defaultRouteOverride` when declared
+- unresolved `targetTags` entries that match no workspace
+- validation warnings such as zero-match targets or missing `focusSkills` names (when Pi skill inventory is available)
+
+The health block stays compact and does not dump raw internal state.
 - Precedence: explicit `routeType` on `monofold_write` or `--route` on `/monofold:write` always wins; when omitted, Active Focus `defaultRouteOverride` is used; otherwise Monofold falls back to `default`.
 - The footer status shows `route:<type>` when the active preset declares an override.
 - Use `design` or `progress` for control/docs presets and `progress` or `research` for project/dev presets so write intent defaults match the work mode without hiding explicit route selection.
@@ -122,7 +133,7 @@ Pi agents use strict `monofold_*` tools behind the natural-language command surf
 
 | Tool | Purpose |
 |------|---------|
-| `monofold_list` | Show manifest and git status summary |
+| `monofold_list` | Show manifest, Active Focus health, and git status summary (first-line Focus status check) |
 | `monofold_read` | Read files, search text, or show a tree inside readable workspaces |
 | `monofold_write` | Create routed Markdown outputs by `routeType`, `title`, and `body` |
 | `monofold_git` | Run guarded workspace git `status`, `commit`, `push`, or `commitPush` |

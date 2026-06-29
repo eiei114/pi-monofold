@@ -3,6 +3,7 @@ import { describe, it, beforeEach } from "node:test";
 import {
   clearActiveFocusPresetId,
   countMatchingWorkspaces,
+  cycleActiveFocusPresetBackward,
   cycleActiveFocusPresetForward,
   ensureActiveFocusInitialized,
   getActiveFocusPresetId,
@@ -234,7 +235,57 @@ describe("active focus session state", () => {
     assert.equal(getActiveFocusPresetId(), "control");
   });
 
-  it("keeps single-preset cycle as a no-op", () => {
+  it("cycles active focus backward in YAML order with wrap-around", () => {
+    ensureActiveFocusInitialized(samplePresets);
+    assert.equal(getActiveFocusPresetId(), "control");
+
+    const firstCycle = cycleActiveFocusPresetBackward(samplePresets);
+    assert.equal(firstCycle?.preset.id, "docs");
+    assert.equal(firstCycle?.index, 1);
+    assert.equal(firstCycle?.total, 2);
+    assert.equal(firstCycle?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "docs");
+
+    const secondCycle = cycleActiveFocusPresetBackward(samplePresets);
+    assert.equal(secondCycle?.preset.id, "control");
+    assert.equal(secondCycle?.index, 0);
+    assert.equal(secondCycle?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "control");
+  });
+
+  it("selects the last preset when cycling backward without an active focus", () => {
+    resetActiveFocusSessionState();
+    clearActiveFocusPresetId();
+
+    const result = cycleActiveFocusPresetBackward(samplePresets);
+    assert.equal(result?.preset.id, "docs");
+    assert.equal(result?.index, 1);
+    assert.equal(result?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "docs");
+  });
+
+  it("selects the first preset when cycling forward without an active focus", () => {
+    resetActiveFocusSessionState();
+    clearActiveFocusPresetId();
+
+    const result = cycleActiveFocusPresetForward(samplePresets);
+    assert.equal(result?.preset.id, "control");
+    assert.equal(result?.index, 0);
+    assert.equal(result?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "control");
+  });
+
+  it("keeps single-preset backward cycle as a no-op", () => {
+    const [onlyPreset] = samplePresets;
+    const result = cycleActiveFocusPresetBackward([onlyPreset!]);
+    assert.equal(result?.preset.id, "control");
+    assert.equal(result?.index, 0);
+    assert.equal(result?.total, 1);
+    assert.equal(result?.changed, false);
+    assert.equal(getActiveFocusPresetId(), "control");
+  });
+
+  it("keeps single-preset forward cycle as a no-op", () => {
     const [onlyPreset] = samplePresets;
     const result = cycleActiveFocusPresetForward([onlyPreset!]);
     assert.equal(result?.preset.id, "control");

@@ -6,6 +6,7 @@ import path from "node:path";
 import YAML from "yaml";
 import {
   type ActiveFocusPresetPosition,
+  cycleActiveFocusPresetBackward,
   cycleActiveFocusPresetForward,
   type FocusPreset,
   ensureActiveFocusInitialized,
@@ -181,6 +182,8 @@ const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 const FOCUS_STATUS_ID = "monofold-focus";
 const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+m";
 const FOCUS_CYCLE_ACTION_ID = "app.monofold.focus.cycleForward";
+const FOCUS_CYCLE_BACKWARD_SHORTCUT = "shift+ctrl+f";
+const FOCUS_CYCLE_BACKWARD_ACTION_ID = "app.monofold.focus.cycleBackward";
 export const FOCUS_CONTEXT_MAX_FILES = 6;
 export const FOCUS_CONTEXT_MAX_CHARS_PER_FILE = 6_000;
 export const FOCUS_CONTEXT_MAX_TOTAL_CHARS = 12_000;
@@ -896,7 +899,7 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
 }
 
 function formatFocusStatus(position: ActiveFocusPresetPosition): string {
-  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT}`;
+  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT} / ${FOCUS_CYCLE_BACKWARD_SHORTCUT}`;
   if (position.preset.defaultRouteOverride) {
     return `${base} route:${position.preset.defaultRouteOverride}`;
   }
@@ -1902,11 +1905,38 @@ ${focusInjection.text}` : ""}
     }
   };
 
+  const cycleFocusBackward = async (ctx: ExtensionContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const focusPresets = loaded.raw.focusPresets ?? [];
+      if (focusPresets.length === 0) {
+        notifyNoFocusPresets(ctx);
+        return;
+      }
+      const result = cycleActiveFocusPresetBackward(focusPresets);
+      if (!result) return;
+      updateFocusStatus(ctx, loaded);
+      warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      if (focusPresets.length === 1) {
+        ctx.ui.notify(`Active Focus unchanged: ${result.preset.label} (1/1)`, "info");
+        return;
+      }
+      ctx.ui.notify(`Active Focus: ${result.preset.label} (${result.index + 1}/${result.total})`, "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Monofold focus cycle failed: ${message}`, "error");
+    }
+  };
+
   pi.registerCommand("monofold:explore", { description: "Explore configured workspaces via natural-language handoff", handler: intentCommand("Explore") });
   pi.registerCommand("monofold:write", { description: "Create routed Markdown via natural-language handoff", handler: intentCommand("Write") });
   pi.registerCommand("monofold:config", { description: "Change Workspace configuration via natural-language handoff", handler: intentCommand("Config") });
   pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
   pi.registerCommand("monofold:focus", { description: "Select the active Monofold focus preset from a TUI list", handler: focusCommand });
+  pi.registerCommand("monofold:focus-prev", {
+    description: "Cycle the active Monofold focus preset backward through focusPresets YAML order",
+    handler: (_args, ctx) => cycleFocusBackward(ctx),
+  });
   pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
   pi.registerCommand("monofold:clear-unknown-path-allows", {
@@ -1917,6 +1947,11 @@ ${focusInjection.text}` : ""}
   pi.registerShortcut(FOCUS_CYCLE_SHORTCUT, {
     description: `${FOCUS_CYCLE_ACTION_ID}: cycle active Monofold focus preset forward`,
     handler: cycleFocusForward,
+  });
+
+  pi.registerShortcut(FOCUS_CYCLE_BACKWARD_SHORTCUT, {
+    description: `${FOCUS_CYCLE_BACKWARD_ACTION_ID}: cycle active Monofold focus preset backward`,
+    handler: cycleFocusBackward,
   });
 
 

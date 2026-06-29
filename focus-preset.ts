@@ -186,6 +186,25 @@ export function cycleActiveFocusPresetForward(focusPresets: FocusPreset[] | unde
   return { preset, index: nextIndex, total: presets.length, changed };
 }
 
+/** Cycles the active focus preset backward in YAML order. */
+export function cycleActiveFocusPresetBackward(focusPresets: FocusPreset[] | undefined): FocusCycleResult | null {
+  const presets = focusPresets ?? [];
+  if (presets.length === 0) {
+    clearActiveFocusPresetId();
+    return null;
+  }
+
+  ensureActiveFocusInitialized(presets);
+  const currentId = getActiveFocusPresetId();
+  const currentIndex = currentId ? presets.findIndex((preset) => preset.id === currentId) : -1;
+  const nextIndex =
+    currentIndex < 0 ? presets.length - 1 : (currentIndex - 1 + presets.length) % presets.length;
+  const preset = presets[nextIndex]!;
+  const changed = presets.length > 1 && preset.id !== currentId;
+  setActiveFocusPresetId(preset.id, presets);
+  return { preset, index: nextIndex, total: presets.length, changed };
+}
+
 /** Clears the active focus preset for the current process/session. */
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;

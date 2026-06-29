@@ -27,10 +27,12 @@ Natural-language arguments are interpreted by the Pi agent. These samples show t
 
 ```text
 /monofold:focus
+/monofold:focus-prev
 ctrl+shift+m
+shift+ctrl+f
 ```
 
-`/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order.
+`/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward and `shift+ctrl+f` (or `/monofold:focus-prev`) cycles backward through `focusPresets` YAML order.
 
 Example `focusSkills` and `defaultRouteOverride` for a control + project/dev pair:
 

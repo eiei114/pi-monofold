@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-30
+
+### Added
+
+- Added `shift+ctrl+f` backward focus-cycle shortcut and `/monofold:focus-prev` command to move Active Focus to the previous preset in YAML order.
+- Footer focus status now shows both forward and backward shortcuts.
+
 ## [0.8.0] - 2026-06-29
 
 ### Added

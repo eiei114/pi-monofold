@@ -3,11 +3,13 @@ import { describe, it, beforeEach } from "node:test";
 import {
   clearActiveFocusPresetId,
   countMatchingWorkspaces,
+  cycleActiveFocusPresetForward,
   ensureActiveFocusInitialized,
   getActiveFocusPresetId,
   parseFocusPresets,
   pickDefaultFocusPresetId,
   resetActiveFocusSessionState,
+  setActiveFocusPresetByLabel,
   setActiveFocusPresetId,
   warnZeroTargetMatchesForPreset,
 } from "../focus-preset.js";
@@ -52,6 +54,63 @@ describe("parseFocusPresets", () => {
     );
   });
 
+  it("accepts optional defaultRouteOverride", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        {
+          id: "docs",
+          label: "Docs",
+          defaultRouteOverride: "progress",
+          targets: [{ targetTags: ["docs"] }],
+        },
+      ]),
+      [
+        {
+          id: "docs",
+          label: "Docs",
+          defaultRouteOverride: "progress",
+          targets: [{ targetTags: ["docs"] }],
+        },
+      ],
+    );
+  });
+
+  it("rejects unknown defaultRouteOverride values", () => {
+    assert.throws(
+      () =>
+        parseFocusPresets([
+          {
+            id: "docs",
+            label: "Docs",
+            defaultRouteOverride: "notes",
+            targets: [{ targetTags: ["docs"] }],
+          },
+        ]),
+      /must be one of/,
+    );
+  });
+
+  it("accepts optional focusSkills", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        {
+          id: "control",
+          label: "Control",
+          focusSkills: ["commit", "review"],
+          targets: [{ targetTags: ["control"] }],
+        },
+      ]),
+      [
+        {
+          id: "control",
+          label: "Control",
+          focusSkills: ["commit", "review"],
+          targets: [{ targetTags: ["control"] }],
+        },
+      ],
+    );
+  });
+
   it("rejects unknown preset keys", () => {
     assert.throws(
       () =>
@@ -59,11 +118,11 @@ describe("parseFocusPresets", () => {
           {
             id: "control",
             label: "Control",
-            focusSkills: ["ignored"],
+            extra: true,
             targets: [{ targetTags: ["control"] }],
           },
         ]),
-      /unknown key: focusSkills/,
+      /unknown key: extra/,
     );
   });
 
@@ -155,6 +214,42 @@ describe("active focus session state", () => {
 
   it("rejects unknown preset ids on set", () => {
     assert.throws(() => setActiveFocusPresetId("missing", samplePresets), /Unknown focus preset id/);
+  });
+
+  it("cycles active focus forward in YAML order", () => {
+    ensureActiveFocusInitialized(samplePresets);
+    assert.equal(getActiveFocusPresetId(), "control");
+
+    const firstCycle = cycleActiveFocusPresetForward(samplePresets);
+    assert.equal(firstCycle?.preset.id, "docs");
+    assert.equal(firstCycle?.index, 1);
+    assert.equal(firstCycle?.total, 2);
+    assert.equal(firstCycle?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "docs");
+
+    const secondCycle = cycleActiveFocusPresetForward(samplePresets);
+    assert.equal(secondCycle?.preset.id, "control");
+    assert.equal(secondCycle?.index, 0);
+    assert.equal(secondCycle?.changed, true);
+    assert.equal(getActiveFocusPresetId(), "control");
+  });
+
+  it("keeps single-preset cycle as a no-op", () => {
+    const [onlyPreset] = samplePresets;
+    const result = cycleActiveFocusPresetForward([onlyPreset!]);
+    assert.equal(result?.preset.id, "control");
+    assert.equal(result?.index, 0);
+    assert.equal(result?.total, 1);
+    assert.equal(result?.changed, false);
+    assert.equal(getActiveFocusPresetId(), "control");
+  });
+
+  it("sets active focus from a select-driven label", () => {
+    const position = setActiveFocusPresetByLabel("Docs", samplePresets);
+    assert.equal(position.preset.id, "docs");
+    assert.equal(position.index, 1);
+    assert.equal(position.total, 2);
+    assert.equal(getActiveFocusPresetId(), "docs");
   });
 });
 

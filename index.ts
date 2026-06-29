@@ -5,25 +5,47 @@ import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile
 import path from "node:path";
 import YAML from "yaml";
 import {
+  type ActiveFocusPresetPosition,
+  cycleActiveFocusPresetForward,
   type FocusPreset,
   ensureActiveFocusInitialized,
   findFocusPresetById,
   getActiveFocusPresetId,
+  getActiveFocusPresetPosition,
+  biasMatchesTowardActiveFocus,
+  isTagBasedTargetInference,
+  matchesFocusTarget,
   parseFocusPresets,
+  setActiveFocusPresetByLabel,
+  setActiveFocusPresetId,
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
+import {
+  resolveWriteRouteType,
+  type MonofoldRouteType,
+} from "./focus-route-override.js";
+import {
+  applyFocusSkillsToSystemPrompt,
+  warnMissingFocusSkills,
+} from "./focus-skills.js";
 import {
   buildMonofoldTree,
   readMonofoldFile,
   runMonofoldSearch,
 } from "./monofold-read-ops.js";
+import {
+  clearUnknownPathAllows,
+  loadUnknownPathAllows,
+  rememberUnknownPathAllow,
+  UNKNOWN_PATH_ALLOWS_RELATIVE_PATH,
+} from "./unknown-path-allows.js";
 import { normalizeGuardPath } from "./path-normalize.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 type CapabilityTag = "read" | "writeDocs" | "editCode" | "runCommands" | "git";
 type LegacyCapabilityTag = CapabilityTag | "gitCommit" | "gitPush";
 type IntentCategory = "Explore" | "Write" | "Config" | "Git";
-type RouteType = "default" | "prd" | "design" | "progress" | "issue" | "research" | "decision";
+type RouteType = MonofoldRouteType;
 
 type RouteConfig = {
   path: string;
@@ -156,6 +178,23 @@ const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
 const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
+const FOCUS_STATUS_ID = "monofold-focus";
+const FOCUS_CYCLE_SHORTCUT = "ctrl+shift+m";
+const FOCUS_CYCLE_ACTION_ID = "app.monofold.focus.cycleForward";
+export const FOCUS_CONTEXT_MAX_FILES = 6;
+export const FOCUS_CONTEXT_MAX_CHARS_PER_FILE = 6_000;
+export const FOCUS_CONTEXT_MAX_TOTAL_CHARS = 12_000;
+const FOCUS_CONTEXT_TRUNCATION_MARKER = "… [truncated]";
+
+type ActiveFocusWorkspace = {
+  workspace: ResolvedWorkspace;
+  targetIndex: number;
+};
+
+type FocusContextInjection = {
+  text: string;
+  totalCapReached: boolean;
+};
 
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
@@ -856,9 +895,56 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
   sendCommandOutput(pi, command, `Error: ${message}\n\nUsage:\n${usage}`, { error: message });
 }
 
+function formatFocusStatus(position: ActiveFocusPresetPosition): string {
+  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT}`;
+  if (position.preset.defaultRouteOverride) {
+    return `${base} route:${position.preset.defaultRouteOverride}`;
+  }
+  return base;
+}
+
+function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
+  if (!ctx.hasUI) return;
+  const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
+  ctx.ui.setStatus(FOCUS_STATUS_ID, position ? formatFocusStatus(position) : undefined);
+}
+
+function notifyFocusApplied(
+  ctx: ExtensionContext | ExtensionCommandContext,
+  loaded: LoadedConfig,
+  position: ActiveFocusPresetPosition,
+  source: "command" | "shortcut",
+): void {
+  updateFocusStatus(ctx, loaded);
+  warnZeroTargetMatchesForPreset(position.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+  ctx.ui.notify(
+    source === "shortcut"
+      ? `Active Focus: ${position.preset.label} (${position.index + 1}/${position.total})`
+      : `Active Focus set to ${position.preset.label} (${position.index + 1}/${position.total})`,
+    "info",
+  );
+}
+
+function notifyNoFocusPresets(ctx: ExtensionContext | ExtensionCommandContext, pi?: ExtensionAPI): void {
+  const message = `No focusPresets configured. Add focusPresets to ${CONFIG_RELATIVE_PATH}, then reload Pi.`;
+  ctx.ui.notify(message, "warning");
+  if (pi) sendCommandOutput(pi, "monofold:focus", message, { focusPresets: 0 });
+}
+
+function biasWorkspaceMatchesWithActiveFocus(loaded: LoadedConfig, matches: ResolvedWorkspace[]): ResolvedWorkspace[] {
+  const activePreset = getActiveFocusPreset(loaded);
+  if (!activePreset) return matches;
+  const activeTargetIds = new Set(getActiveFocusWorkspaces(loaded, activePreset).map(({ workspace }) => workspace.targetId));
+  return biasMatchesTowardActiveFocus(matches, activeTargetIds);
+}
+
 async function resolveWorkspace(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
-  const matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
+  ensureActiveFocusInitialized(loaded.raw.focusPresets);
+  let matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
   if (matches.length === 0) throw new Error(`No workspace matches target: ${JSON.stringify(target)}`);
+  if (matches.length > 1 && isTagBasedTargetInference(target)) {
+    matches = biasWorkspaceMatchesWithActiveFocus(loaded, matches);
+  }
   if (matches.length === 1) return matches[0];
   if (!ctx.hasUI) {
     throw new Error(`Multiple workspaces match target in non-interactive mode: ${matches.map(formatWorkspaceLabel).join(", ")}`);
@@ -873,6 +959,42 @@ function formatWorkspaceLabel(workspace: ResolvedWorkspace): string {
   const displayName = workspace.name ? `${workspace.name} ` : "";
   const parent = workspace.kind === "project" && workspace.parent ? ` parent=${workspace.parent.name ?? workspace.parent.targetId}` : "";
   return `${workspace.targetId} ${displayName}[${workspace.tags.join(", ")}] ${workspace.displayPath}${parent}`;
+}
+
+function formatCollapsedWorkspaceLine(workspace: ResolvedWorkspace): string {
+  const label = workspace.name ?? "(unnamed)";
+  return `${workspace.targetId} ${label} [${workspace.tags.join(", ")}] ${workspace.displayPath}`;
+}
+
+function getActiveFocusPreset(loaded: LoadedConfig): FocusPreset | undefined {
+  const activeId = getActiveFocusPresetId();
+  return activeId ? findFocusPresetById(loaded.raw.focusPresets, activeId) : undefined;
+}
+
+function getActiveFocusWorkspaces(loaded: LoadedConfig, preset: FocusPreset): ActiveFocusWorkspace[] {
+  const active: ActiveFocusWorkspace[] = [];
+  const seenTargets = new Set<string>();
+  for (let targetIndex = 0; targetIndex < preset.targets.length; targetIndex += 1) {
+    const target = preset.targets[targetIndex]!;
+    for (const workspace of loaded.workspaces) {
+      if (seenTargets.has(workspace.targetId)) continue;
+      if (!matchesFocusTarget(workspace, target.targetTags)) continue;
+      seenTargets.add(workspace.targetId);
+      active.push({ workspace, targetIndex });
+    }
+  }
+  return active;
+}
+
+function truncateWithMarker(value: string, maxChars: number): { text: string; truncated: boolean } {
+  if (value.length <= maxChars) return { text: value, truncated: false };
+  if (maxChars <= FOCUS_CONTEXT_TRUNCATION_MARKER.length) {
+    return { text: FOCUS_CONTEXT_TRUNCATION_MARKER.slice(0, maxChars), truncated: true };
+  }
+  return {
+    text: value.slice(0, maxChars - FOCUS_CONTEXT_TRUNCATION_MARKER.length) + FOCUS_CONTEXT_TRUNCATION_MARKER,
+    truncated: true,
+  };
 }
 
 function relativePath(workspace: ResolvedWorkspace, inputPath: string): string {
@@ -893,20 +1015,108 @@ async function gitRoot(workspace: ResolvedWorkspace): Promise<string | undefined
   return undefined;
 }
 
+async function buildFullWorkspaceManifestEntry(workspace: ResolvedWorkspace, suffix = ""): Promise<string> {
+  const git = await gitSummary(workspace).catch((error) => ({ isGit: false, status: `git status error: ${String(error)}` }));
+  return (
+    `- ${formatWorkspaceLabel(workspace)}${suffix}\n` +
+    `  capabilities: ${workspace.capabilities.join(", ")}\n` +
+    `  routes: ${Object.keys(workspace.normalizedRoutes).join(", ") || "none"}\n` +
+    `  contextFiles: ${workspace.effectiveContextFiles.join(", ") || "none"}\n` +
+    `  git: ${git.isGit ? git.status : "not a git repository"}`
+  );
+}
+
 async function buildManifest(loaded: LoadedConfig): Promise<string> {
   const lines = ["Pi Monofold Manifest:"];
-  for (const workspace of loaded.workspaces) {
-    const git = await gitSummary(workspace).catch((error) => ({ isGit: false, status: `git status error: ${String(error)}` }));
-    lines.push(
-      `- ${formatWorkspaceLabel(workspace)}\n` +
-        `  capabilities: ${workspace.capabilities.join(", ")}\n` +
-        `  routes: ${Object.keys(workspace.normalizedRoutes).join(", ") || "none"}\n` +
-        `  contextFiles: ${workspace.effectiveContextFiles.join(", ") || "none"}\n` +
-        `  git: ${git.isGit ? git.status : "not a git repository"}`,
-    );
+  const activePreset = getActiveFocusPreset(loaded);
+  if (activePreset) {
+    const activeWorkspaces = getActiveFocusWorkspaces(loaded, activePreset);
+    const activeTargetIds = new Set(activeWorkspaces.map(({ workspace }) => workspace.targetId));
+    if (activeWorkspaces.length > 0) {
+      lines.push(`Active Focus: ${activePreset.label} (${activePreset.id})`);
+      if (activePreset.defaultRouteOverride) {
+        lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
+      }
+      for (const { workspace } of activeWorkspaces) {
+        lines.push(await buildFullWorkspaceManifestEntry(workspace, " (active)"));
+      }
+      const collapsed = loaded.workspaces.filter((workspace) => !activeTargetIds.has(workspace.targetId));
+      if (collapsed.length > 0) {
+        lines.push("Non-active Workspace Targets (collapsed):");
+        for (const workspace of collapsed) lines.push(`- ${formatCollapsedWorkspaceLine(workspace)}`);
+      }
+      lines.push("Use monofold_* tools for cross-workspace operations. Do not guess output paths when a route exists.");
+      return lines.join("\n");
+    }
   }
+  for (const workspace of loaded.workspaces) lines.push(await buildFullWorkspaceManifestEntry(workspace));
   lines.push("Use monofold_* tools for cross-workspace operations. Do not guess output paths when a route exists.");
   return lines.join("\n");
+}
+
+async function buildFocusContextInjection(loaded: LoadedConfig, preset: FocusPreset): Promise<FocusContextInjection> {
+  const activeWorkspaces = getActiveFocusWorkspaces(loaded, preset);
+  const lines = ["## Focus Context Injection", "", `Active Focus: ${preset.label} (${preset.id})`];
+  if (preset.defaultRouteOverride) {
+    lines.push(`Default write route override: ${preset.defaultRouteOverride} (explicit routeType/--route still wins)`);
+  }
+  const notices: string[] = [];
+  const seenFiles = new Set<string>();
+  let injectedFileCount = 0;
+  let totalInjectedChars = 0;
+  let skippedByFileCap = 0;
+  let skippedByTotalCap = 0;
+  let totalCapReached = false;
+
+  for (const { workspace } of activeWorkspaces) {
+    for (const contextFile of workspace.effectiveContextFiles) {
+      const absolutePath = relativePath(workspace, contextFile);
+      const dedupeKey = normalizeGuardPath(absolutePath);
+      if (seenFiles.has(dedupeKey)) continue;
+      seenFiles.add(dedupeKey);
+
+      if (injectedFileCount >= FOCUS_CONTEXT_MAX_FILES) {
+        skippedByFileCap += 1;
+        continue;
+      }
+
+      let raw: string;
+      try {
+        raw = await readFile(absolutePath, "utf8");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notices.push(`Skipped unreadable context file ${workspace.targetId}:${contextFile} (${message})`);
+        continue;
+      }
+
+      const perFile = truncateWithMarker(raw, FOCUS_CONTEXT_MAX_CHARS_PER_FILE);
+      if (perFile.truncated) notices.push(`Truncated ${workspace.targetId}:${contextFile} to ${FOCUS_CONTEXT_MAX_CHARS_PER_FILE} characters`);
+
+      if (totalInjectedChars + perFile.text.length > FOCUS_CONTEXT_MAX_TOTAL_CHARS) {
+        skippedByTotalCap += 1;
+        totalCapReached = true;
+        continue;
+      }
+
+      injectedFileCount += 1;
+      totalInjectedChars += perFile.text.length;
+      lines.push(
+        "",
+        `### ${workspace.targetId} ${workspace.name ?? "(unnamed)"}: ${contextFile}`,
+        `Workspace Target: ${formatWorkspaceLabel(workspace)}`,
+        "```text",
+        perFile.text,
+        "```",
+      );
+    }
+  }
+
+  if (skippedByFileCap > 0) notices.push(`Skipped ${skippedByFileCap} context file(s) after the ${FOCUS_CONTEXT_MAX_FILES}-file cap`);
+  if (skippedByTotalCap > 0) notices.push(`Skipped ${skippedByTotalCap} context file(s) after the ${FOCUS_CONTEXT_MAX_TOTAL_CHARS}-character total cap`);
+  if (injectedFileCount === 0) notices.push("No focus context files were injected for the active preset");
+  if (notices.length > 0) lines.splice(3, 0, "", "Notices:", ...notices.map((notice) => `- ${notice}`));
+
+  return { text: lines.join("\n"), totalCapReached };
 }
 
 function slugify(title: string): string {
@@ -958,8 +1168,16 @@ async function confirm(ctx: ExtensionContext, title: string, body: string): Prom
 async function maybeBlockUnknown(ctx: ExtensionContext, loaded: LoadedConfig, targetPath: string, action: string) {
   const workspace = findWorkspaceForPath(loaded, targetPath);
   if (workspace) return undefined;
-  const ok = await confirm(ctx, "Unknown Path", `${action} targets an unknown path:\n${targetPath}\nAllow this operation?`);
-  if (!ok) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  const normalized = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
+  const storedAllows = await loadUnknownPathAllows(loaded.root);
+  if (storedAllows.has(normalized)) return undefined;
+  if (!ctx.hasUI) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  const choice = await ctx.ui.select(
+    `Unknown Path — ${normalized}`,
+    ["Yes (remember across sessions)", "Yes (just this once)", "No"],
+  );
+  if (!choice || choice === "No") return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };
+  if (choice === "Yes (remember across sessions)") await rememberUnknownPathAllow(loaded.root, normalized);
   return undefined;
 }
 
@@ -1010,6 +1228,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
     try {
       const loaded = await loadConfig(ctx.cwd);
       ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      updateFocusStatus(ctx, loaded);
       const activeId = getActiveFocusPresetId();
       if (!activeId) return;
       const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
@@ -1024,15 +1243,40 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);
+      ensureActiveFocusInitialized(loaded.raw.focusPresets);
       const manifest = await buildManifest(loaded);
+      const activePreset = getActiveFocusPreset(loaded);
+      const focusInjection = activePreset ? await buildFocusContextInjection(loaded, activePreset) : undefined;
+      if (focusInjection?.totalCapReached && ctx.hasUI) {
+        ctx.ui.notify(
+          `Focus Context Injection reached the ${FOCUS_CONTEXT_MAX_TOTAL_CHARS}-character total cap; skipped remaining context files.`,
+          "warning",
+        );
+      }
+      if (activePreset && ctx.hasUI) {
+        warnMissingFocusSkills(
+          activePreset.id,
+          activePreset.focusSkills,
+          _event.systemPromptOptions?.skills,
+          (message) => ctx.ui.notify(message, "warning"),
+        );
+      }
+      const baseSystemPrompt = applyFocusSkillsToSystemPrompt(
+        _event.systemPrompt,
+        _event.systemPromptOptions?.skills,
+        activePreset?.focusSkills,
+      );
       return {
         systemPrompt:
-          _event.systemPrompt +
+          baseSystemPrompt +
           `
 
 ## Pi Monofold
 
 ${manifest}
+${focusInjection ? `
+
+${focusInjection.text}` : ""}
 `,
       };
     } catch {
@@ -1156,7 +1400,7 @@ ${manifest}
     label: "Workspace Write",
     description: "Write a Markdown document to a routed Workspace destination using routeType, title, body, filename, and metadata.",
     parameters: Type.Object({
-      routeType: Type.String({ description: "default, prd, design, progress, issue, research, or decision" }),
+      routeType: Type.Optional(Type.String({ description: "default, prd, design, progress, issue, research, or decision; omitted uses active Focus defaultRouteOverride or default" })),
       title: Type.String(),
       body: Type.String(),
       filename: Type.Optional(Type.String()),
@@ -1167,9 +1411,9 @@ ${manifest}
       workspaceName: Type.Optional(Type.String()),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const routeType = params.routeType as RouteType;
-      if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown routeType: ${params.routeType}`);
       const loaded = await loadConfig(ctx.cwd);
+      const activePreset = getActiveFocusPreset(loaded);
+      const routeType = resolveWriteRouteType(params.routeType, activePreset?.defaultRouteOverride);
       const workspace = await resolveWorkspace(ctx, loaded, {
         targetTags: params.targetTags,
         targetName: params.targetName,
@@ -1383,14 +1627,15 @@ ${manifest}
   const writeCommand = async (args: string, ctx: ExtensionCommandContext) => {
     try {
       const parsed = parseCommandArgs(args);
-      const routeType = (stringFlag(parsed.flags, "route", "r") ?? parsed.positional[0] ?? "default") as RouteType;
-      if (!ROUTE_TYPES.includes(routeType)) throw new Error(`Unknown routeType: ${routeType}`);
       const title = stringFlag(parsed.flags, "title", "t");
       const body = stringFlag(parsed.flags, "body", "b");
       if (!title) throw new Error("--title is required");
       if (!body) throw new Error("--body is required");
 
       const loaded = await loadConfig(ctx.cwd);
+      const activePreset = getActiveFocusPreset(loaded);
+      const explicitRoute = stringFlag(parsed.flags, "route", "r") ?? parsed.positional[0];
+      const routeType = resolveWriteRouteType(explicitRoute, activePreset?.defaultRouteOverride);
       const workspace = await resolveWorkspace(ctx, loaded, commandTarget(parsed.flags, ["writeDocs"]));
       const route = workspace.normalizedRoutes[routeType] ?? workspace.normalizedRoutes.default;
       if (!route) throw new Error(`Workspace has no route for ${routeType} and no default route`);
@@ -1565,6 +1810,22 @@ ${manifest}
     }
   };
 
+  const clearUnknownPathAllowsCommand = async (_args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const count = await clearUnknownPathAllows(ctx.cwd);
+      sendCommandOutput(
+        pi,
+        "monofold:clear-unknown-path-allows",
+        count > 0
+          ? `Cleared ${count} remembered unknown path allow${count === 1 ? "" : "s"} from ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`
+          : `No remembered unknown path allows found at ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
+        { count, path: UNKNOWN_PATH_ALLOWS_RELATIVE_PATH },
+      );
+    } catch (error) {
+      sendCommandError(pi, "monofold:clear-unknown-path-allows", error, "/monofold:clear-unknown-path-allows");
+    }
+  };
+
   const intentCommand = (intent: IntentCategory) => async (args: string, ctx: ExtensionCommandContext) => {
     const prepared = await prepareIntentConfiguration(ctx);
     if (!prepared) {
@@ -1580,43 +1841,106 @@ ${manifest}
     sendCommandOutput(pi, "monofold:guide", "Queued Monofold guide.", { request: args.trim() });
   };
 
+  const focusCommand = async (_args: string, ctx: ExtensionCommandContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const focusPresets = loaded.raw.focusPresets ?? [];
+      ensureActiveFocusInitialized(focusPresets);
+      updateFocusStatus(ctx, loaded);
+
+      if (focusPresets.length === 0) {
+        notifyNoFocusPresets(ctx, pi);
+        return;
+      }
+
+      if (!ctx.hasUI) {
+        const message = "/monofold:focus requires the Pi TUI to choose a focus preset.";
+        ctx.ui.notify(message, "warning");
+        sendCommandOutput(pi, "monofold:focus", message, { requiresTui: true });
+        return;
+      }
+
+      if (focusPresets.length === 1) {
+        const preset = focusPresets[0]!;
+        setActiveFocusPresetId(preset.id, focusPresets);
+        notifyFocusApplied(ctx, loaded, { preset, index: 0, total: 1 }, "command");
+        return;
+      }
+
+      const choice = await ctx.ui.select("Select Monofold Focus", focusPresets.map((preset) => preset.label));
+      if (!choice) {
+        ctx.ui.notify("Focus selection cancelled", "info");
+        return;
+      }
+      const position = setActiveFocusPresetByLabel(choice, focusPresets);
+      notifyFocusApplied(ctx, loaded, position, "command");
+    } catch (error) {
+      sendCommandError(pi, "monofold:focus", error, "/monofold:focus");
+    }
+  };
+
+  const cycleFocusForward = async (ctx: ExtensionContext) => {
+    try {
+      const loaded = await loadConfig(ctx.cwd);
+      const focusPresets = loaded.raw.focusPresets ?? [];
+      if (focusPresets.length === 0) {
+        notifyNoFocusPresets(ctx);
+        return;
+      }
+      const result = cycleActiveFocusPresetForward(focusPresets);
+      if (!result) return;
+      updateFocusStatus(ctx, loaded);
+      warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      if (focusPresets.length === 1) {
+        ctx.ui.notify(`Active Focus unchanged: ${result.preset.label} (1/1)`, "info");
+        return;
+      }
+      ctx.ui.notify(`Active Focus: ${result.preset.label} (${result.index + 1}/${result.total})`, "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Monofold focus cycle failed: ${message}`, "error");
+    }
+  };
+
   pi.registerCommand("monofold:explore", { description: "Explore configured workspaces via natural-language handoff", handler: intentCommand("Explore") });
   pi.registerCommand("monofold:write", { description: "Create routed Markdown via natural-language handoff", handler: intentCommand("Write") });
   pi.registerCommand("monofold:config", { description: "Change Workspace configuration via natural-language handoff", handler: intentCommand("Config") });
   pi.registerCommand("monofold:git", { description: "Run workspace git workflows via natural-language handoff", handler: intentCommand("Git") });
+  pi.registerCommand("monofold:focus", { description: "Select the active Monofold focus preset from a TUI list", handler: focusCommand });
   pi.registerCommand("monofold:guide", { description: "Conversational guide for Pi Monofold workflows", handler: guideCommand });
   pi.registerCommand("monofold:update", { description: `Migrate and validate ${CONFIG_RELATIVE_PATH}`, handler: updateCommand });
+  pi.registerCommand("monofold:clear-unknown-path-allows", {
+    description: `Clear remembered unknown-path allows stored in ${UNKNOWN_PATH_ALLOWS_RELATIVE_PATH}`,
+    handler: clearUnknownPathAllowsCommand,
+  });
+
+  pi.registerShortcut(FOCUS_CYCLE_SHORTCUT, {
+    description: `${FOCUS_CYCLE_ACTION_ID}: cycle active Monofold focus preset forward`,
+    handler: cycleFocusForward,
+  });
+
 
   pi.registerCommand("monofold:list", { description: "List configured Pi Monofold workspaces (legacy)", handler: listCommand });
-  pi.registerCommand("monofold_list", { description: "Alias for /monofold:list (legacy)", handler: listCommand });
+
   pi.registerCommand("monofold:tree", {
     description: "Show a bounded tree for a configured workspace (legacy)",
     handler: (args, ctx) => readCommand(`tree ${args}`, ctx),
   });
-  pi.registerCommand("monofold_tree", {
-    description: "Alias for /monofold:tree (legacy)",
-    handler: (args, ctx) => readCommand(`tree ${args}`, ctx),
-  });
+
   pi.registerCommand("monofold:read", { description: "Read, tree, or search a configured workspace with safe defaults (legacy)", handler: readCommand });
-  pi.registerCommand("monofold_read", { description: "Alias for /monofold:read (legacy)", handler: readCommand });
+
   pi.registerCommand("monofold:search", {
     description: "Search a configured workspace with safe defaults (legacy)",
     handler: (args, ctx) => readCommand(`search ${args}`, ctx),
   });
-  pi.registerCommand("monofold_search", {
-    description: "Alias for /monofold:search (legacy)",
-    handler: (args, ctx) => readCommand(`search ${args}`, ctx),
-  });
+
   pi.registerCommand("monofold:add", { description: `Add a workspace to ${CONFIG_RELATIVE_PATH} (legacy)`, handler: addCommand });
-  pi.registerCommand("monofold_add", { description: "Alias for /monofold:add (legacy)", handler: addCommand });
+
   pi.registerCommand("monofold:project-add", {
     description: "Add a project workspace under a parent workspace (legacy)",
     handler: projectAddCommand,
   });
-  pi.registerCommand("monofold_project_add", {
-    description: "Alias for /monofold:project-add (legacy)",
-    handler: projectAddCommand,
-  });
+
 
   const initCommand = async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {

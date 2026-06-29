@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-29
+
+### Added
+
+- Optional `defaultRouteOverride` on Focus presets biases write-route defaults while that preset is Active Focus.
+- Unknown `defaultRouteOverride` values fail validation with actionable errors.
+- Active Focus status and manifest output show the resolved route override when present.
+- Explicit `routeType` / `--route` still override Focus-derived defaults.
+- Documented configuration examples and precedence rules for `defaultRouteOverride`.
+
+## [0.7.0] - 2026-06-28
+
+### Added
+
+- Optional `focusSkills` on Focus presets auto-loads a bounded set of declared Pi skills when that preset is active.
+- Missing or unknown `focusSkills` names emit actionable runtime warnings instead of failing silently.
+- Documented when to use `focusSkills` versus Pi Skill Shiori or ordinary triggerable skill discovery.
+
+## [0.6.2] - 2026-06-21
+
+### Added
+
+- Bias tag-based Unique Target Inference toward Active Focus workspaces in `monofold_read`, `monofold_write`, and `monofold_git` when a tag query matches multiple candidates.
+
+## [0.6.1] - 2026-06-19
+
+### Changed
+
+- Document Focus Preset as the Monofold-owned workspace-context switch pattern in the shared Pi extension OSS rules (vault reference; no package behavior change).
+
+## [0.6.0] - 2026-06-16
+
+### Added
+
+- Inject Active Focus context files into agent turns with provisional file-count, per-file, and total-character caps.
+- Recompose focused manifests so active Workspace Targets appear first and non-active targets are collapsed.
+
+## [0.5.0] - 2026-06-09
+
+### Changed
+
+- Marked the safe-read behavior changes as a minor release boundary: `monofold_read` file reads now default to metadata plus a bounded preview instead of full file content.
+- Documented capped search/tree output with truncation markers so exploratory reads stay safe for chat history.
+- Noted legacy slash-command parity for the same safe file preview and capped search/tree behavior.
+
+## [0.4.0] - 2026-06-08
+
+### Added
+
+- Added `/monofold:focus`, the `ctrl+shift+m` forward focus-cycle shortcut, and a footer status indicator for the active focus preset.
+
+## [0.3.3] - 2026-06-06
+
+### Removed
+
+- Legacy underscored slash commands (`monofold_list`, `monofold_read`, `monofold_tree`, `monofold_search`, `monofold_add`, `monofold_project_add`, `monofold_clear_unknown_path_allows`). Use the colon-separated equivalents (`monofold:list`, `monofold:read`, etc.) instead.
+
 ## [0.3.2] - 2026-06-04
 
 ### Fixed

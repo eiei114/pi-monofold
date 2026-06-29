@@ -1,3 +1,5 @@
+import { type MonofoldRouteType, parseDefaultRouteOverride } from "./focus-route-override.js";
+import { parseFocusSkills, resetFocusSkillsWarningState } from "./focus-skills.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
 export type FocusPresetTarget = {
@@ -8,13 +10,15 @@ export type FocusPreset = {
   id: string;
   label: string;
   targets: FocusPresetTarget[];
+  focusSkills?: string[];
+  defaultRouteOverride?: MonofoldRouteType;
 };
 
 export type FocusMatchableWorkspace = {
   tags: string[];
 };
 
-const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets"]);
+const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills", "defaultRouteOverride"]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
 /** Parses and validates focus preset configuration from YAML/JSON input. */
@@ -49,9 +53,17 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
       }
       targets.push({ targetTags });
     }
+    const focusSkills = parseFocusSkills(itemLabel, item.focusSkills);
+    const defaultRouteOverride = parseDefaultRouteOverride(itemLabel, item.defaultRouteOverride);
     if (seenIds.has(item.id)) throw new Error(`${label} has duplicate preset id: ${item.id}`);
     seenIds.add(item.id);
-    presets.push({ id: item.id, label: item.label, targets });
+    presets.push({
+      id: item.id,
+      label: item.label,
+      targets,
+      ...(focusSkills !== undefined ? { focusSkills } : {}),
+      ...(defaultRouteOverride !== undefined ? { defaultRouteOverride } : {}),
+    });
   }
   return presets;
 }
@@ -118,16 +130,100 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   }
   activeFocusPresetId = id;
   activeFocusInitialized = true;
+  resetFocusSkillsWarningState();
+}
+
+export type ActiveFocusPresetPosition = {
+  preset: FocusPreset;
+  index: number;
+  total: number;
+};
+
+export type FocusCycleResult = ActiveFocusPresetPosition & {
+  changed: boolean;
+};
+
+/** Returns the current active focus preset and YAML-order position, if any. */
+export function getActiveFocusPresetPosition(
+  focusPresets: FocusPreset[] | undefined,
+): ActiveFocusPresetPosition | null {
+  if (!focusPresets || focusPresets.length === 0) return null;
+  const activeId = getActiveFocusPresetId();
+  if (!activeId) return null;
+  const index = focusPresets.findIndex((preset) => preset.id === activeId);
+  if (index < 0) return null;
+  return { preset: focusPresets[index]!, index, total: focusPresets.length };
+}
+
+/** Selects a focus preset by the user-facing label returned from ctx.ui.select. */
+export function setActiveFocusPresetByLabel(
+  label: string,
+  focusPresets: FocusPreset[] | undefined,
+): ActiveFocusPresetPosition {
+  const presets = focusPresets ?? [];
+  const index = presets.findIndex((preset) => preset.label === label);
+  if (index < 0) throw new Error(`Unknown focus preset label: ${label}`);
+  const preset = presets[index]!;
+  setActiveFocusPresetId(preset.id, presets);
+  return { preset, index, total: presets.length };
+}
+
+/** Cycles the active focus preset forward in YAML order. */
+export function cycleActiveFocusPresetForward(focusPresets: FocusPreset[] | undefined): FocusCycleResult | null {
+  const presets = focusPresets ?? [];
+  if (presets.length === 0) {
+    clearActiveFocusPresetId();
+    return null;
+  }
+
+  ensureActiveFocusInitialized(presets);
+  const currentId = getActiveFocusPresetId();
+  const currentIndex = currentId ? presets.findIndex((preset) => preset.id === currentId) : -1;
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % presets.length;
+  const preset = presets[nextIndex]!;
+  const changed = presets.length > 1 && preset.id !== currentId;
+  setActiveFocusPresetId(preset.id, presets);
+  return { preset, index: nextIndex, total: presets.length, changed };
 }
 
 /** Clears the active focus preset for the current process/session. */
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = true;
+  resetFocusSkillsWarningState();
 }
 
 /** Resets in-memory session state (for tests and process restart). */
 export function resetActiveFocusSessionState(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = false;
+  resetFocusSkillsWarningState();
+}
+
+export type TagBasedTargetInput = {
+  targetTags?: string[];
+  targetId?: string;
+  targetName?: string;
+  workspaceName?: string;
+  workspaceIndex?: number;
+};
+
+/** Returns true when workspace resolution relies on tag query without an explicit selector. */
+export function isTagBasedTargetInference(target: TagBasedTargetInput): boolean {
+  if (!target.targetTags?.length) return false;
+  if (target.targetId) return false;
+  const targetName = target.targetName ?? target.workspaceName;
+  if (targetName) return false;
+  if (target.workspaceIndex !== undefined) return false;
+  return true;
+}
+
+/** Narrows ambiguous tag matches to active-focus targets when at least one in-focus candidate exists. */
+export function biasMatchesTowardActiveFocus<T extends { targetId: string }>(
+  matches: T[],
+  activeTargetIds: ReadonlySet<string>,
+): T[] {
+  if (matches.length <= 1 || activeTargetIds.size === 0) return matches;
+  const inFocus = matches.filter((match) => activeTargetIds.has(match.targetId));
+  return inFocus.length > 0 ? inFocus : matches;
 }

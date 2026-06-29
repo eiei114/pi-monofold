@@ -23,6 +23,34 @@ Natural-language arguments are interpreted by the Pi agent. These samples show t
 /monofold:config add 4_Project/NewApp as a Project Workspace under Obsidian Vault with tag project,newapp
 ```
 
+## Focus presets
+
+```text
+/monofold:focus
+ctrl+shift+m
+```
+
+`/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order.
+
+Example `focusSkills` and `defaultRouteOverride` for a control + project/dev pair:
+
+```yaml
+focusPresets:
+  - id: control
+    label: Control docs
+    defaultRouteOverride: design
+    focusSkills: [commit]
+    targets:
+      - targetTags: [control, markdown]
+  - id: pi-monofold
+    label: Pi Monofold
+    defaultRouteOverride: progress
+    focusSkills: [commit, pr-review]
+    targets:
+      - targetTags: [project, pi-monofold]
+      - targetTags: [development, pi-monofold]
+```
+
 ## Git
 
 ```text

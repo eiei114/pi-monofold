@@ -20,7 +20,7 @@ See [docs/usage.md](./docs/usage.md) for configuration, commands, agent tools, a
 
 - **Virtual monorepo manifest** — declare workspaces and project workspaces in `.pi/monofold.yaml`
 - **Routed Markdown writes** — route PRDs, progress notes, and other doc types to configured folders
-- **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces
+- **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces, with bounded previews by default
 - **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags
 - **Focus presets** — tag-based focus targets for the control workspace
 - **Natural-language commands** — `/monofold:explore`, `/monofold:write`, `/monofold:config`, `/monofold:git`, and more
@@ -86,7 +86,8 @@ pi -e npm:pi-monofold
 1. Install the extension (see [Install](#install)).
 2. In your control repository, create `.pi/monofold.yaml` with at least one workspace entry (or run `/monofold:init`).
 3. Start Pi in the control repository and run `/monofold:explore show the project workspaces`.
-4. Use `/monofold:write` for routed Markdown outputs and `/monofold:git` for guarded git workflows.
+4. Use `/monofold:focus` or `ctrl+shift+m` to switch focus presets when `focusPresets` are configured.
+5. Use `/monofold:write` for routed Markdown outputs and `/monofold:git` for guarded git workflows.
 
 Example command flows: [docs/examples.md](./docs/examples.md).
 
@@ -98,11 +99,43 @@ Example command flows: [docs/examples.md](./docs/examples.md).
 | `/monofold:write` | Create routed Markdown outputs |
 | `/monofold:config` | Add or change workspaces and project workspaces |
 | `/monofold:git` | Run guarded git status, commit, push, or commit+push |
+| `/monofold:focus` | Select the active focus preset from a TUI list |
 | `/monofold:guide` | Interactive guide for common flows |
 | `/monofold:init` | Create or update `.pi/monofold.yaml` |
 | `/monofold:update` | Migrate legacy config and optionally request config edits |
 
+Default focus shortcut: `ctrl+shift+m` cycles Active Focus forward through `focusPresets` YAML order. No backward focus shortcut ships in the MVP.
+
+When Active Focus is set, Pi Monofold injects the active preset's `contextFiles` into each agent turn under **Focus Context Injection** and recomposes the manifest so active Workspace Targets are shown first while non-active targets are collapsed to one-line summaries. Tag-based target inference in `monofold_read`, `monofold_write`, and `monofold_git` also prefers Workspace Targets that belong to the active preset when a tag query would otherwise match multiple candidates; explicit `targetId` / workspace name selectors and uniquely matching targets are unchanged. If multiple in-focus targets still tie, the existing workspace selection flow applies. The MVP uses provisional context-injection caps that are intentionally temporary and exposed as constants for future tuning:
+
+- Max **6** context files per active preset.
+- Max **6,000** characters per file, with `… [truncated]` appended when a file is cut.
+- Max **12,000** injected file-content characters per turn; remaining files are skipped and a warning is surfaced once for that turn.
+
 Agent tools (`monofold_list`, `monofold_read`, `monofold_write`, `monofold_git`, `monofold_init`) sit behind these commands. Full reference: [docs/usage.md](./docs/usage.md).
+
+## Safe read defaults
+
+`monofold_read` can reach files across multiple configured workspaces. Returning full file bodies or unbounded search/tree output by default would flood the agent chat and can bias later turns. Pi Monofold therefore uses **preview-first, capped-by-default** reads.
+
+| `monofold_read` mode | Default output |
+|----------------------|----------------|
+| **file** | Path, size, line/character counts, modified time, then a bounded preview (first **20** lines, up to **2,000** characters). Files that already fit those bounds are shown in full without a truncation marker. |
+| **search** | Up to **50** match lines and **8,000** characters of ripgrep output. |
+| **tree** | Up to **200** entries; traversal depth is capped at **5**. |
+
+When output is cut, the tool response includes a **`[truncated]`** marker (file mode) or a **`[truncated: …]`** footer (search/tree) that states what was shown and how to request more.
+
+**Request more content intentionally:**
+
+| Goal | `monofold_read` parameters |
+|------|----------------------------|
+| Full file body | `mode: "file"`, `includeContent: true` |
+| Larger bounded file slice | `head`, `tail`, and/or `maxChars` (positive integers) |
+| More search results | Higher `maxMatches` and/or `maxChars`, or a narrower `path` / `query` |
+| Larger directory tree | Higher `maxEntries`, lower `depth`, or a narrower `path` |
+
+Agents should call **`monofold_read`** (not guess at raw Pi `read`). Humans should use **`/monofold:explore`** with natural language. Legacy slash commands such as `/monofold:read` apply the same caps for compatibility but are **not** the preferred human-facing surface—see [docs/usage.md](./docs/usage.md#safe-read-contract-monofold_read).
 
 ## Package contents
 

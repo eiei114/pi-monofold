@@ -23,13 +23,16 @@ const sampleSkills: Skill[] = [
   },
 ];
 
-function loadBeforeAgentStart() {
+function loadExtension() {
   const handlers = new Map<string, Function[]>();
+  const tools = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
   piMultiWorkspace({
     on(name: string, handler: Function) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
-    registerTool() {},
+    registerTool(options: { name: string; execute: (...args: any[]) => Promise<any> }) {
+      tools.set(options.name, options);
+    },
     registerCommand() {},
     registerShortcut() {},
     sendMessage() {},
@@ -37,7 +40,11 @@ function loadBeforeAgentStart() {
   } as any);
   const handler = handlers.get("before_agent_start")?.[0] as BeforeAgentStartHandler | undefined;
   assert.ok(handler);
-  return handler;
+  return { handler, tools };
+}
+
+function loadBeforeAgentStart() {
+  return loadExtension().handler;
 }
 
 async function makeRoot(config: string) {
@@ -141,5 +148,31 @@ workspaces:
     );
     assert.equal(notifications.length, 1);
     assert.match(notifications[0], /missing-skill/);
+  });
+
+  it("includes declared focusSkills in monofold_list manifest output", async () => {
+    const root = await makeRoot(`version: 1
+focusPresets:
+  - id: control
+    label: Control
+    focusSkills: [commit]
+    targets:
+      - targetTags: [control]
+workspaces:
+  - name: Control
+    path: .
+    tags: [control]
+    capabilities: [read]
+`);
+    const { tools } = loadExtension();
+    const list = tools.get("monofold_list");
+    assert.ok(list);
+    const result = await list.execute("1", {}, undefined, undefined, {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, select: async () => undefined },
+    });
+    assert.match(result.content[0]!.text, /Focus skills: commit \(prompt filtered to declared names\)/);
+    assert.match(result.content[0]!.text, /Focus health: ok/);
   });
 });

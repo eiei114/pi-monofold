@@ -96,6 +96,14 @@ describe("applyFocusSkillsToSystemPrompt", () => {
     assert.equal(result, "base");
     assert.doesNotMatch(result, /<available_skills>/);
   });
+
+  it("strips the default catalog when every declared name is missing from inventory", () => {
+    const prompt = `base${skillsBlock}`;
+    const result = applyFocusSkillsToSystemPrompt(prompt, sampleSkills, ["missing-a", "missing-b"]);
+    assert.equal(result, "base");
+    assert.doesNotMatch(result, /<available_skills>/);
+    assert.doesNotMatch(result, /<name>commit<\/name>/);
+  });
 });
 
 describe("stripSkillsSectionFromSystemPrompt", () => {

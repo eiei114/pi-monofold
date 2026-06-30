@@ -4,6 +4,11 @@
 
 - `monofold_list` now includes a compact **Active Focus Health** block (preset, route override, unresolved targets, and validation warnings) as the first-line Focus status surface.
 
+### Changed
+
+- `monofold_list` Active Focus health now lists declared `focusSkills` for the active preset.
+- Documented dogfood recommendations for when to enable `focusSkills`, including the all-declared-names-missing case (`docs/usage.md`, `docs/focus-skills-dogfood.md`).
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

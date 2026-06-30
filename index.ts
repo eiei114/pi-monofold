@@ -17,6 +17,7 @@ import {
   isTagBasedTargetInference,
   matchesFocusTarget,
   parseFocusPresets,
+  validateFocusPresetsAgainstWorkspaces,
   setActiveFocusPresetByLabel,
   setActiveFocusPresetId,
   warnZeroTargetMatchesForPreset,
@@ -469,6 +470,19 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
         commitScope: normalizeSlashes(path.relative(resolvedPath, projectResolvedPath)),
       });
     }
+  }
+
+  if (focusPresets.length > 0) {
+    validateFocusPresetsAgainstWorkspaces(
+      focusPresets,
+      workspaces.map((workspace) => ({
+        targetId: workspace.targetId,
+        name: workspace.name,
+        tags: workspace.tags,
+        capabilities: workspace.capabilities,
+        routeTypes: Object.keys(workspace.normalizedRoutes),
+      })),
+    );
   }
 
   return {

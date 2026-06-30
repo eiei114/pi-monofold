@@ -26,10 +26,6 @@ focusPresets:
     defaultRouteOverride: progress
     targets:
       - targetTags: [docs]
-  - id: control
-    label: Control
-    targets:
-      - targetTags: [control]
 workspaces:
   - name: Docs
     path: ./docs
@@ -198,7 +194,7 @@ workspaces:
     assert.match(result.content[0]!.text, /Focus health: no focusPresets configured/);
   });
 
-  it("shows focus warnings for unresolved active focus targets in monofold_list", async () => {
+  it("rejects unresolved focus targets during config validation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-focus-warning-"));
     await mkdir(path.join(root, ".pi"), { recursive: true });
     await mkdir(path.join(root, "docs"), { recursive: true });
@@ -224,14 +220,14 @@ workspaces:
     const list = tools.get("monofold_list");
     assert.ok(list);
 
-    const result = await list.execute("1", {}, undefined, undefined, {
-      cwd: root,
-      hasUI: false,
-      ui: { notify() {}, setStatus() {}, select: async () => undefined },
-    });
-
-    assert.match(result.content[0]!.text, /Active Focus: Missing Target \(missing, 1\/1\)/);
-    assert.match(result.content[0]!.text, /Focus warnings:/);
-    assert.match(result.content[0]!.text, /Focus target \[production\] matches no configured workspace/);
+    await assert.rejects(
+      () =>
+        list.execute("1", {}, undefined, undefined, {
+          cwd: root,
+          hasUI: false,
+          ui: { notify() {}, setStatus() {}, select: async () => undefined },
+        }),
+      /matches no workspace target in preset "missing"/,
+    );
   });
 });

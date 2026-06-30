@@ -18,6 +18,13 @@ export type FocusMatchableWorkspace = {
   tags: string[];
 };
 
+export type FocusPresetValidationWorkspace = FocusMatchableWorkspace & {
+  targetId: string;
+  name?: string;
+  capabilities: readonly string[];
+  routeTypes: readonly string[];
+};
+
 const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills", "defaultRouteOverride"]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
@@ -67,6 +74,84 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
   }
   return presets;
 }
+function formatFocusTargetTags(targetTags: string[]): string {
+  return `[${targetTags.join(", ")}]`;
+}
+
+/** Validates focus preset targets against resolved workspace targets before activation. */
+export function validateFocusPresetsAgainstWorkspaces(
+  focusPresets: FocusPreset[],
+  workspaces: FocusPresetValidationWorkspace[],
+  label = "focusPresets",
+): void {
+  for (let presetIndex = 0; presetIndex < focusPresets.length; presetIndex += 1) {
+    const preset = focusPresets[presetIndex]!;
+    const presetLabel = `${label}[${presetIndex}]`;
+    const seenTargetTags = new Set<string>();
+
+    for (let targetIndex = 0; targetIndex < preset.targets.length; targetIndex += 1) {
+      const target = preset.targets[targetIndex]!;
+      const targetLabel = `${presetLabel}.targets[${targetIndex}]`;
+      const targetKey = JSON.stringify(target.targetTags);
+      if (seenTargetTags.has(targetKey)) {
+        throw new Error(
+          `${targetLabel} duplicates targetTags ${formatFocusTargetTags(target.targetTags)} in preset "${preset.id}"`,
+        );
+      }
+      seenTargetTags.add(targetKey);
+
+      const matches = workspaces.filter((workspace) => matchesFocusTarget(workspace, target.targetTags));
+      if (matches.length === 0) {
+        throw new Error(
+          `${targetLabel}.targetTags ${formatFocusTargetTags(target.targetTags)} matches no workspace target in preset "${preset.id}"`,
+        );
+      }
+    }
+
+    const workspaceMatches = new Map<string, number[]>();
+    for (let targetIndex = 0; targetIndex < preset.targets.length; targetIndex += 1) {
+      const target = preset.targets[targetIndex]!;
+      for (const workspace of workspaces) {
+        if (!matchesFocusTarget(workspace, target.targetTags)) continue;
+        const indices = workspaceMatches.get(workspace.targetId) ?? [];
+        indices.push(targetIndex);
+        workspaceMatches.set(workspace.targetId, indices);
+      }
+    }
+    for (const [targetId, targetIndices] of workspaceMatches) {
+      if (targetIndices.length <= 1) continue;
+      const workspace = workspaces.find((candidate) => candidate.targetId === targetId);
+      const workspaceLabel = workspace?.name ? `${targetId} (${workspace.name})` : targetId;
+      const selectors = targetIndices
+        .map((index) => `${presetLabel}.targets[${index}] ${formatFocusTargetTags(preset.targets[index]!.targetTags)}`)
+        .join(" and ");
+      throw new Error(
+        `${presetLabel} targets ${targetIndices.map((index) => `[${index}]`).join(" and ")} both match workspace ${workspaceLabel}: ${selectors}. Use one selector per workspace target.`,
+      );
+    }
+
+    if (preset.defaultRouteOverride) {
+      const route = preset.defaultRouteOverride;
+      for (let targetIndex = 0; targetIndex < preset.targets.length; targetIndex += 1) {
+        const target = preset.targets[targetIndex]!;
+        const targetLabel = `${presetLabel}.targets[${targetIndex}]`;
+        for (const workspace of workspaces.filter((candidate) => matchesFocusTarget(candidate, target.targetTags))) {
+          if (!workspace.capabilities.includes("writeDocs")) {
+            throw new Error(
+              `${presetLabel}.defaultRouteOverride "${route}" requires writeDocs on ${workspace.targetId}, but ${targetLabel} matched capabilities [${workspace.capabilities.join(", ")}]`,
+            );
+          }
+          if (!workspace.routeTypes.includes(route)) {
+            throw new Error(
+              `${presetLabel}.defaultRouteOverride "${route}" requires route "${route}" on ${workspace.targetId}, but ${targetLabel} matched routes [${workspace.routeTypes.join(", ") || "none"}]`,
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
 
 /** Returns the first preset id, or null when no focus preset is available. */
 export function pickDefaultFocusPresetId(focusPresets: FocusPreset[] | undefined): string | null {

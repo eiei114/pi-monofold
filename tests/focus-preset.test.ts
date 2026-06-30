@@ -12,6 +12,7 @@ import {
   resetActiveFocusSessionState,
   setActiveFocusPresetByLabel,
   setActiveFocusPresetId,
+  validateFocusPresetsAgainstWorkspaces,
   warnZeroTargetMatchesForPreset,
 } from "../focus-preset.js";
 
@@ -301,6 +302,116 @@ describe("active focus session state", () => {
     assert.equal(position.index, 1);
     assert.equal(position.total, 2);
     assert.equal(getActiveFocusPresetId(), "docs");
+  });
+});
+
+const sampleWorkspaces = [
+  {
+    targetId: "#0",
+    name: "Control",
+    tags: ["control"],
+    capabilities: ["read"],
+    routeTypes: [] as string[],
+  },
+  {
+    targetId: "#1",
+    name: "Docs",
+    tags: ["markdown", "planning"],
+    capabilities: ["read", "writeDocs"],
+    routeTypes: ["default", "progress"],
+  },
+];
+
+describe("validateFocusPresetsAgainstWorkspaces", () => {
+  it("accepts valid presets against configured workspaces", () => {
+    assert.doesNotThrow(() => validateFocusPresetsAgainstWorkspaces(samplePresets, sampleWorkspaces));
+  });
+
+  it("rejects missing workspace targets", () => {
+    assert.throws(
+      () =>
+        validateFocusPresetsAgainstWorkspaces(
+          [
+            {
+              id: "broken",
+              label: "Broken",
+              targets: [{ targetTags: ["missing-tag"] }],
+            },
+          ],
+          sampleWorkspaces,
+        ),
+      /matches no workspace target in preset "broken"/,
+    );
+  });
+
+  it("rejects duplicate targetTags in one preset", () => {
+    assert.throws(
+      () =>
+        validateFocusPresetsAgainstWorkspaces(
+          [
+            {
+              id: "dup",
+              label: "Dup",
+              targets: [{ targetTags: ["control"] }, { targetTags: ["control"] }],
+            },
+          ],
+          sampleWorkspaces,
+        ),
+      /duplicates targetTags \[control\]/,
+    );
+  });
+
+  it("rejects overlapping target selectors that match the same workspace", () => {
+    assert.throws(
+      () =>
+        validateFocusPresetsAgainstWorkspaces(
+          [
+            {
+              id: "overlap",
+              label: "Overlap",
+              targets: [{ targetTags: ["markdown", "planning"] }, { targetTags: ["markdown"] }],
+            },
+          ],
+          sampleWorkspaces,
+        ),
+      /both match workspace #1 \(Docs\)/,
+    );
+  });
+
+  it("rejects defaultRouteOverride when matched workspace lacks writeDocs", () => {
+    assert.throws(
+      () =>
+        validateFocusPresetsAgainstWorkspaces(
+          [
+            {
+              id: "control",
+              label: "Control",
+              defaultRouteOverride: "progress",
+              targets: [{ targetTags: ["control"] }],
+            },
+          ],
+          sampleWorkspaces,
+        ),
+      /requires writeDocs on #0/,
+    );
+  });
+
+  it("rejects defaultRouteOverride when matched workspace lacks the route", () => {
+    assert.throws(
+      () =>
+        validateFocusPresetsAgainstWorkspaces(
+          [
+            {
+              id: "docs",
+              label: "Docs",
+              defaultRouteOverride: "design",
+              targets: [{ targetTags: ["markdown", "planning"] }],
+            },
+          ],
+          sampleWorkspaces,
+        ),
+      /requires route "design" on #1/,
+    );
   });
 });
 

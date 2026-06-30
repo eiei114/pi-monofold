@@ -81,10 +81,23 @@ The example above includes a generic seed preset `control`. Add matching workspa
 
 Optional `focusSkills` on a preset declares up to six Pi skill names to expose automatically while that preset is Active Focus.
 
-- Use `focusSkills` for a small, stable set of skills you always want for a control/project pair (for example commit helpers for a vault + OSS dev preset).
+- Use `focusSkills` for a small, stable set of skills you always want for a control/project pair (for example `commit` on a control preset and `commit` + `pr-review` on a project/dev preset).
+- Omit `focusSkills` when you rely on Pi's full skill catalog or task-triggered discovery; filtering is opt-in per preset.
 - Pi still discovers skills through the normal inventory; Monofold only filters the system prompt to the declared names for the active preset.
 - Unknown names produce a warning with the missing skill name. Fix the name, install the skill package, or reload Pi after changes.
+- When every declared name is missing, Monofold removes the default skills block and injects nothing. That reduces prompt noise but also hides the full catalog until you fix names or remove `focusSkills`.
 - Prefer Pi Skill Shiori (`shiori:*`) or `/skill:name` when you need task-triggered discovery across the full catalog instead of a fixed preset bundle.
+
+**When to enable `focusSkills` (dogfood recommendation):**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Control vault with 20+ installed skills | Enable on the control preset with 1–2 stable helpers (for example `commit`) to cut catalog noise. |
+| Project/dev preset with known git + review flows | Enable with 2–3 workflow skills; cycle Focus to switch bundles. |
+| Exploratory work or unfamiliar repos | Omit `focusSkills`; use Shiori or `/skill:name` instead. |
+| Skill names still in flux | Omit until names are stable; missing names strip the catalog without injecting replacements. |
+
+`monofold_list` shows declared `focusSkills` for the active preset alongside route override and health warnings.
 
 ### defaultRouteOverride
 

@@ -1057,6 +1057,9 @@ async function buildManifest(
     if (activePreset.defaultRouteOverride) {
       lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
     }
+    if (activePreset.focusSkills) {
+      lines.push(`Focus skills: ${activePreset.focusSkills.join(", ")} (prompt filtered to declared names)`);
+    }
     const missingTargets = activePreset.targets.filter(
       (target) => !loaded.workspaces.some((workspace) => matchesFocusTarget(workspace, target.targetTags)),
     );

@@ -6,13 +6,15 @@ import path from "node:path";
 import YAML from "yaml";
 import {
   type ActiveFocusPresetPosition,
+  applyActiveFocusSession,
   cycleActiveFocusPresetBackward,
   cycleActiveFocusPresetForward,
   type FocusPreset,
-  ensureActiveFocusInitialized,
   findFocusPresetById,
+  getActiveFocusInitSource,
   getActiveFocusPresetId,
   getActiveFocusPresetPosition,
+  isActiveFocusSessionInitialized,
   biasMatchesTowardActiveFocus,
   isTagBasedTargetInference,
   matchesFocusTarget,
@@ -36,6 +38,11 @@ import {
   readMonofoldFile,
   runMonofoldSearch,
 } from "./monofold-read-ops.js";
+import {
+  FOCUS_SESSION_STATE_RELATIVE_PATH,
+  loadFocusSessionState,
+  saveFocusSessionState,
+} from "./focus-session-state.js";
 import {
   clearUnknownPathAllows,
   loadUnknownPathAllows,
@@ -913,12 +920,52 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
   sendCommandOutput(pi, command, `Error: ${message}\n\nUsage:\n${usage}`, { error: message });
 }
 
+function formatActiveFocusInitSourceSuffix(): string {
+  const source = getActiveFocusInitSource();
+  if (source === "restored") return " [restored]";
+  if (source === "stale") return " [stale save, using default]";
+  if (source === "malformed") return " [using default]";
+  return "";
+}
+
 function formatFocusStatus(position: ActiveFocusPresetPosition): string {
-  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT} / ${FOCUS_CYCLE_BACKWARD_SHORTCUT}`;
+  const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total})${formatActiveFocusInitSourceSuffix()} ${FOCUS_CYCLE_SHORTCUT} / ${FOCUS_CYCLE_BACKWARD_SHORTCUT}`;
   if (position.preset.defaultRouteOverride) {
     return `${base} route:${position.preset.defaultRouteOverride}`;
   }
   return base;
+}
+
+function notifyActiveFocusInitSource(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
+  if (!ctx.hasUI) return;
+  const source = getActiveFocusInitSource();
+  if (source === "malformed") {
+    ctx.ui.notify(
+      `Ignored malformed focus session state at ${FOCUS_SESSION_STATE_RELATIVE_PATH}; using default Active Focus.`,
+      "warning",
+    );
+    return;
+  }
+  if (source === "stale") {
+    ctx.ui.notify("Saved Active Focus preset is no longer valid; using default.", "warning");
+    return;
+  }
+  if (source === "restored") {
+    const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
+    if (position) {
+      ctx.ui.notify(`Restored Active Focus: ${position.preset.label} (${position.index + 1}/${position.total})`, "info");
+    }
+  }
+}
+
+async function ensureActiveFocusReady(loaded: LoadedConfig): Promise<void> {
+  if (isActiveFocusSessionInitialized()) return;
+  const persisted = await loadFocusSessionState(loaded.root);
+  applyActiveFocusSession(loaded.raw.focusPresets, persisted);
+}
+
+async function persistActiveFocusSession(root: string): Promise<void> {
+  await saveFocusSessionState(root, getActiveFocusPresetId());
 }
 
 function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
@@ -957,7 +1004,7 @@ function biasWorkspaceMatchesWithActiveFocus(loaded: LoadedConfig, matches: Reso
 }
 
 async function resolveWorkspace(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig, target: TargetInput): Promise<ResolvedWorkspace> {
-  ensureActiveFocusInitialized(loaded.raw.focusPresets);
+  await ensureActiveFocusReady(loaded);
   let matches = loaded.workspaces.filter((workspace) => matchesTarget(workspace, target));
   if (matches.length === 0) throw new Error(`No workspace matches target: ${JSON.stringify(target)}`);
   if (matches.length > 1 && isTagBasedTargetInference(target)) {
@@ -1048,12 +1095,14 @@ async function buildManifest(
   loaded: LoadedConfig,
   options?: { skills?: import("@earendil-works/pi-coding-agent").Skill[] },
 ): Promise<string> {
-  ensureActiveFocusInitialized(loaded.raw.focusPresets);
+  await ensureActiveFocusReady(loaded);
   const lines = ["Pi Monofold Manifest:"];
   const activePreset = getActiveFocusPreset(loaded);
   const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
   if (activePreset && position) {
-    lines.push(`Active Focus: ${activePreset.label} (${activePreset.id}, ${position.index + 1}/${position.total})`);
+    lines.push(
+      `Active Focus: ${activePreset.label} (${activePreset.id}, ${position.index + 1}/${position.total})${formatActiveFocusInitSourceSuffix()}`,
+    );
     if (activePreset.defaultRouteOverride) {
       lines.push(`Default write route override: ${activePreset.defaultRouteOverride} (explicit routeType/--route still wins)`);
     }
@@ -1276,8 +1325,9 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);
-      ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      await ensureActiveFocusReady(loaded);
       updateFocusStatus(ctx, loaded);
+      notifyActiveFocusInitSource(ctx, loaded);
       const activeId = getActiveFocusPresetId();
       if (!activeId) return;
       const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
@@ -1292,7 +1342,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
     try {
       const loaded = await loadConfig(ctx.cwd);
-      ensureActiveFocusInitialized(loaded.raw.focusPresets);
+      await ensureActiveFocusReady(loaded);
       const manifest = await buildManifest(loaded, { skills: _event.systemPromptOptions?.skills });
       const activePreset = getActiveFocusPreset(loaded);
       const focusInjection = activePreset ? await buildFocusContextInjection(loaded, activePreset) : undefined;
@@ -1894,7 +1944,7 @@ ${focusInjection.text}` : ""}
     try {
       const loaded = await loadConfig(ctx.cwd);
       const focusPresets = loaded.raw.focusPresets ?? [];
-      ensureActiveFocusInitialized(focusPresets);
+      await ensureActiveFocusReady(loaded);
       updateFocusStatus(ctx, loaded);
 
       if (focusPresets.length === 0) {
@@ -1912,6 +1962,7 @@ ${focusInjection.text}` : ""}
       if (focusPresets.length === 1) {
         const preset = focusPresets[0]!;
         setActiveFocusPresetId(preset.id, focusPresets);
+        await persistActiveFocusSession(ctx.cwd);
         notifyFocusApplied(ctx, loaded, { preset, index: 0, total: 1 }, "command");
         return;
       }
@@ -1922,6 +1973,7 @@ ${focusInjection.text}` : ""}
         return;
       }
       const position = setActiveFocusPresetByLabel(choice, focusPresets);
+      await persistActiveFocusSession(ctx.cwd);
       notifyFocusApplied(ctx, loaded, position, "command");
     } catch (error) {
       sendCommandError(pi, "monofold:focus", error, "/monofold:focus");
@@ -1936,8 +1988,10 @@ ${focusInjection.text}` : ""}
         notifyNoFocusPresets(ctx);
         return;
       }
+      await ensureActiveFocusReady(loaded);
       const result = cycleActiveFocusPresetForward(focusPresets);
       if (!result) return;
+      await persistActiveFocusSession(ctx.cwd);
       updateFocusStatus(ctx, loaded);
       warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
       if (focusPresets.length === 1) {
@@ -1959,8 +2013,10 @@ ${focusInjection.text}` : ""}
         notifyNoFocusPresets(ctx);
         return;
       }
+      await ensureActiveFocusReady(loaded);
       const result = cycleActiveFocusPresetBackward(focusPresets);
       if (!result) return;
+      await persistActiveFocusSession(ctx.cwd);
       updateFocusStatus(ctx, loaded);
       warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
       if (focusPresets.length === 1) {

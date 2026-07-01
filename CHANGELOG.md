@@ -1,7 +1,12 @@
 ## Unreleased
 
+## [0.10.0] - 2026-07-02
+
 ### Added
 
+- Cross-session Active Focus restore via `.pi/monofold-focus-session.json`, with safe fallback when saved state is missing, malformed, or stale.
+- Footer status and manifest output annotate restored or fallback Active Focus initialization.
+- Startup warnings for malformed session state or stale saved preset ids.
 - `monofold_list` now includes a compact **Active Focus Health** block (preset, route override, unresolved targets, and validation warnings) as the first-line Focus status surface.
 
 ### Changed

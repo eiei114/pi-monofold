@@ -9,6 +9,15 @@
 - `monofold_list` Active Focus health now lists declared `focusSkills` for the active preset.
 - Documented dogfood recommendations for when to enable `focusSkills`, including the all-declared-names-missing case (`docs/usage.md`, `docs/focus-skills-dogfood.md`).
 
+## [0.10.0] - 2026-07-02
+
+### Added
+
+- Optional `decisionNoteDestination` on Focus presets exposes one reusable decision/note file when that preset is Active Focus.
+- Missing decision-note workspaces or files emit actionable runtime warnings instead of failing silently.
+- Active Focus manifest, status, and context injection surface the configured decision-note destination.
+- Documented when to use `decisionNoteDestination` versus ordinary `monofold_write` decision routes.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

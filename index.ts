@@ -32,6 +32,12 @@ import {
   warnMissingFocusSkills,
 } from "./focus-skills.js";
 import {
+  findDecisionNoteWorkspace,
+  formatDecisionNoteDestinationLabel,
+  warnUnavailableDecisionNoteDestination,
+  type FocusDecisionNoteDestination,
+} from "./focus-decision-note.js";
+import {
   buildMonofoldTree,
   readMonofoldFile,
   runMonofoldSearch,
@@ -915,10 +921,11 @@ function sendCommandError(pi: ExtensionAPI, command: string, error: unknown, usa
 
 function formatFocusStatus(position: ActiveFocusPresetPosition): string {
   const base = `focus: ${position.preset.label} (${position.index + 1}/${position.total}) ${FOCUS_CYCLE_SHORTCUT} / ${FOCUS_CYCLE_BACKWARD_SHORTCUT}`;
-  if (position.preset.defaultRouteOverride) {
-    return `${base} route:${position.preset.defaultRouteOverride}`;
-  }
-  return base;
+  const route = position.preset.defaultRouteOverride ? ` route:${position.preset.defaultRouteOverride}` : "";
+  const note = position.preset.decisionNoteDestination
+    ? ` note:${position.preset.decisionNoteDestination.path}`
+    : "";
+  return `${base}${route}${note}`;
 }
 
 function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, loaded: LoadedConfig): void {
@@ -927,14 +934,19 @@ function updateFocusStatus(ctx: ExtensionContext | ExtensionCommandContext, load
   ctx.ui.setStatus(FOCUS_STATUS_ID, position ? formatFocusStatus(position) : undefined);
 }
 
-function notifyFocusApplied(
+async function notifyFocusApplied(
   ctx: ExtensionContext | ExtensionCommandContext,
   loaded: LoadedConfig,
   position: ActiveFocusPresetPosition,
   source: "command" | "shortcut",
-): void {
+): Promise<void> {
   updateFocusStatus(ctx, loaded);
-  warnZeroTargetMatchesForPreset(position.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+  await warnActiveFocusPresetIssues(
+    position.preset,
+    loaded,
+    loaded.workspaces,
+    (message) => ctx.ui.notify(message, "warning"),
+  );
   ctx.ui.notify(
     source === "shortcut"
       ? `Active Focus: ${position.preset.label} (${position.index + 1}/${position.total})`
@@ -1015,6 +1027,83 @@ function truncateWithMarker(value: string, maxChars: number): { text: string; tr
   };
 }
 
+
+type ResolvedDecisionNoteDestination = {
+  workspace: ResolvedWorkspace;
+  destination: FocusDecisionNoteDestination;
+  absolutePath: string;
+};
+
+async function resolveDecisionNoteDestination(
+  loaded: LoadedConfig,
+  destination: FocusDecisionNoteDestination,
+): Promise<ResolvedDecisionNoteDestination | undefined> {
+  const workspace = findDecisionNoteWorkspace(loaded.workspaces, destination);
+  if (!workspace) return undefined;
+  return {
+    workspace,
+    destination,
+    absolutePath: relativePath(workspace, destination.path),
+  };
+}
+
+async function isReadableDecisionNoteFile(absolutePath: string): Promise<boolean> {
+  try {
+    await access(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function warnDecisionNoteDestinationIfNeeded(
+  preset: FocusPreset,
+  loaded: LoadedConfig,
+  resolved: ResolvedDecisionNoteDestination | undefined,
+  fileAvailable: boolean,
+  warn: (message: string) => void,
+): void {
+  const destination = preset.decisionNoteDestination;
+  if (!destination) return;
+  if (!resolved) {
+    warnUnavailableDecisionNoteDestination(preset.id, destination, "", "missing-workspace", warn);
+    return;
+  }
+  if (!fileAvailable) {
+    warnUnavailableDecisionNoteDestination(
+      preset.id,
+      destination,
+      formatWorkspaceLabel(resolved.workspace),
+      "missing-file",
+      warn,
+    );
+  }
+}
+
+async function inspectDecisionNoteDestination(
+  loaded: LoadedConfig,
+  preset: FocusPreset,
+): Promise<{ resolved?: ResolvedDecisionNoteDestination; fileAvailable: boolean }> {
+  const destination = preset.decisionNoteDestination;
+  if (!destination) return { fileAvailable: false };
+  const resolved = await resolveDecisionNoteDestination(loaded, destination);
+  if (!resolved) return { fileAvailable: false };
+  const fileAvailable = await isReadableDecisionNoteFile(resolved.absolutePath);
+  return { resolved, fileAvailable };
+}
+
+async function warnActiveFocusPresetIssues(
+  preset: FocusPreset,
+  loaded: LoadedConfig,
+  workspaces: ResolvedWorkspace[],
+  warn: (message: string) => void,
+): Promise<void> {
+  warnZeroTargetMatchesForPreset(preset, workspaces, warn);
+  const decisionNote = await inspectDecisionNoteDestination(loaded, preset);
+  warnDecisionNoteDestinationIfNeeded(preset, loaded, decisionNote.resolved, decisionNote.fileAvailable, warn);
+}
+
+
 function relativePath(workspace: ResolvedWorkspace, inputPath: string): string {
   assertWorkspaceInternalRelative("path", inputPath);
   return path.join(workspace.resolvedPath, inputPath);
@@ -1060,6 +1149,19 @@ async function buildManifest(
     if (activePreset.focusSkills) {
       lines.push(`Focus skills: ${activePreset.focusSkills.join(", ")} (prompt filtered to declared names)`);
     }
+    const decisionNote = await inspectDecisionNoteDestination(loaded, activePreset);
+    if (activePreset.decisionNoteDestination) {
+      if (decisionNote.resolved) {
+        const status = decisionNote.fileAvailable ? "available" : "missing file";
+        lines.push(
+          `Decision note destination: ${formatDecisionNoteDestinationLabel(formatWorkspaceLabel(decisionNote.resolved.workspace), activePreset.decisionNoteDestination)} (${status})`,
+        );
+      } else {
+        lines.push(
+          `Decision note destination: [${activePreset.decisionNoteDestination.targetTags.join(", ")}] -> ${activePreset.decisionNoteDestination.path} (missing workspace)`,
+        );
+      }
+    }
     const missingTargets = activePreset.targets.filter(
       (target) => !loaded.workspaces.some((workspace) => matchesFocusTarget(workspace, target.targetTags)),
     );
@@ -1069,6 +1171,16 @@ async function buildManifest(
         (target) => `Focus target [${target.targetTags.join(", ")}] matches no configured workspace`,
       ),
       ...missingSkills.map((name) => `Focus skill "${name}" was not found in Pi's discovered inventory`),
+      ...(activePreset.decisionNoteDestination && !decisionNote.resolved
+        ? [
+            `Decision note destination [${activePreset.decisionNoteDestination.targetTags.join(", ")}] -> ${activePreset.decisionNoteDestination.path} matches no configured workspace`,
+          ]
+        : []),
+      ...(activePreset.decisionNoteDestination && decisionNote.resolved && !decisionNote.fileAvailable
+        ? [
+            `Decision note destination ${formatDecisionNoteDestinationLabel(formatWorkspaceLabel(decisionNote.resolved.workspace), activePreset.decisionNoteDestination)} is unavailable`,
+          ]
+        : []),
     ];
     if (warnings.length > 0) {
       lines.push("Focus warnings:");
@@ -1109,6 +1221,24 @@ async function buildFocusContextInjection(loaded: LoadedConfig, preset: FocusPre
   if (preset.defaultRouteOverride) {
     lines.push(`Default write route override: ${preset.defaultRouteOverride} (explicit routeType/--route still wins)`);
   }
+  const decisionNote = await inspectDecisionNoteDestination(loaded, preset);
+  if (preset.decisionNoteDestination) {
+    if (decisionNote.resolved) {
+      const label = formatDecisionNoteDestinationLabel(
+        formatWorkspaceLabel(decisionNote.resolved.workspace),
+        preset.decisionNoteDestination,
+      );
+      lines.push(
+        decisionNote.fileAvailable
+          ? `Decision note destination: ${label} (reuse this file for preset decision capture; monofold_write with routeType decision still creates new routed files)`
+          : `Decision note destination: ${label} (configured but unavailable)`,
+      );
+    } else {
+      lines.push(
+        `Decision note destination: [${preset.decisionNoteDestination.targetTags.join(", ")}] -> ${preset.decisionNoteDestination.path} (missing workspace)`,
+      );
+    }
+  }
   const notices: string[] = [];
   const seenFiles = new Set<string>();
   let injectedFileCount = 0;
@@ -1116,6 +1246,43 @@ async function buildFocusContextInjection(loaded: LoadedConfig, preset: FocusPre
   let skippedByFileCap = 0;
   let skippedByTotalCap = 0;
   let totalCapReached = false;
+
+  if (decisionNote.resolved && decisionNote.fileAvailable) {
+    const workspace = decisionNote.resolved.workspace;
+    const contextFile = decisionNote.resolved.destination.path;
+    const absolutePath = decisionNote.resolved.absolutePath;
+    const dedupeKey = normalizeGuardPath(absolutePath);
+    seenFiles.add(dedupeKey);
+    let raw: string | undefined;
+    try {
+      raw = await readFile(absolutePath, "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notices.push(`Skipped unreadable decision note ${workspace.targetId}:${contextFile} (${message})`);
+    }
+    if (raw !== undefined) {
+      const perFile = truncateWithMarker(raw, FOCUS_CONTEXT_MAX_CHARS_PER_FILE);
+      if (perFile.truncated) {
+        notices.push(`Truncated decision note ${workspace.targetId}:${contextFile} to ${FOCUS_CONTEXT_MAX_CHARS_PER_FILE} characters`);
+      }
+      if (totalInjectedChars + perFile.text.length <= FOCUS_CONTEXT_MAX_TOTAL_CHARS) {
+        injectedFileCount += 1;
+        totalInjectedChars += perFile.text.length;
+        lines.push(
+          "",
+          `### Decision note ${workspace.targetId} ${workspace.name ?? "(unnamed)"}: ${contextFile}`,
+          `Workspace Target: ${formatWorkspaceLabel(workspace)}`,
+          "```text",
+          perFile.text,
+          "```",
+        );
+      } else {
+        skippedByTotalCap += 1;
+        totalCapReached = true;
+        notices.push(`Skipped decision note ${workspace.targetId}:${contextFile} after the ${FOCUS_CONTEXT_MAX_TOTAL_CHARS}-character total cap`);
+      }
+    }
+  }
 
   for (const { workspace } of activeWorkspaces) {
     for (const contextFile of workspace.effectiveContextFiles) {
@@ -1283,7 +1450,7 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
       const preset = findFocusPresetById(loaded.raw.focusPresets, activeId);
       if (!preset) return;
       if (!ctx.hasUI) return;
-      warnZeroTargetMatchesForPreset(preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      await warnActiveFocusPresetIssues(preset, loaded, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
     } catch {
       return;
     }
@@ -1307,6 +1474,12 @@ export default function piMultiWorkspace(pi: ExtensionAPI) {
           activePreset.id,
           activePreset.focusSkills,
           _event.systemPromptOptions?.skills,
+          (message) => ctx.ui.notify(message, "warning"),
+        );
+        await warnActiveFocusPresetIssues(
+          activePreset,
+          loaded,
+          loaded.workspaces,
           (message) => ctx.ui.notify(message, "warning"),
         );
       }
@@ -1912,7 +2085,7 @@ ${focusInjection.text}` : ""}
       if (focusPresets.length === 1) {
         const preset = focusPresets[0]!;
         setActiveFocusPresetId(preset.id, focusPresets);
-        notifyFocusApplied(ctx, loaded, { preset, index: 0, total: 1 }, "command");
+        await notifyFocusApplied(ctx, loaded, { preset, index: 0, total: 1 }, "command");
         return;
       }
 
@@ -1922,7 +2095,7 @@ ${focusInjection.text}` : ""}
         return;
       }
       const position = setActiveFocusPresetByLabel(choice, focusPresets);
-      notifyFocusApplied(ctx, loaded, position, "command");
+      await notifyFocusApplied(ctx, loaded, position, "command");
     } catch (error) {
       sendCommandError(pi, "monofold:focus", error, "/monofold:focus");
     }
@@ -1939,7 +2112,7 @@ ${focusInjection.text}` : ""}
       const result = cycleActiveFocusPresetForward(focusPresets);
       if (!result) return;
       updateFocusStatus(ctx, loaded);
-      warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      await warnActiveFocusPresetIssues(result.preset, loaded, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
       if (focusPresets.length === 1) {
         ctx.ui.notify(`Active Focus unchanged: ${result.preset.label} (1/1)`, "info");
         return;
@@ -1962,7 +2135,7 @@ ${focusInjection.text}` : ""}
       const result = cycleActiveFocusPresetBackward(focusPresets);
       if (!result) return;
       updateFocusStatus(ctx, loaded);
-      warnZeroTargetMatchesForPreset(result.preset, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
+      await warnActiveFocusPresetIssues(result.preset, loaded, loaded.workspaces, (message) => ctx.ui.notify(message, "warning"));
       if (focusPresets.length === 1) {
         ctx.ui.notify(`Active Focus unchanged: ${result.preset.label} (1/1)`, "info");
         return;

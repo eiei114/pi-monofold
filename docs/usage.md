@@ -24,12 +24,18 @@ focusPresets:
     label: Control workspace focus
     defaultRouteOverride: design
     focusSkills: [commit]
+    decisionNoteDestination:
+      targetTags: [control]
+      path: Decisions/ACTIVE.md
     targets:
       - targetTags: [control]
   - id: pi-monofold
     label: Pi Monofold project + dev
     defaultRouteOverride: progress
     focusSkills: [commit, pr-review]
+    decisionNoteDestination:
+      targetTags: [project, pi-monofold]
+      path: Progress/DECISIONS.md
     targets:
       - targetTags: [project, pi-monofold]
       - targetTags: [development, pi-monofold]
@@ -73,7 +79,7 @@ Optional `focusPresets` define tag-based focus targets for the control workspace
 
 Active focus (the selected preset id) is persisted in `.pi/monofold-focus-session.json` for the Control Repository. When Pi starts a new session in the same Control Repository, Monofold restores the saved preset when it still exists in `focusPresets`; otherwise it falls back to the first preset in YAML order. A malformed session-state file or a deleted preset id does not block startup. When the saved state is explicitly cleared (`activeFocusPresetId: null`), Active Focus stays unset across restarts.
 
-On first use (no session-state file), the first preset in YAML order becomes active at session start unless a later command changes it. The footer status and manifest annotate restored or fallback initialization (`[restored]`, `[stale save, using default]`, `[using default]`).
+Footer status and manifest output append `[restored]`, `[stale save, using default]`, or `[using default]` when applicable so you can tell whether Focus was restored or freshly chosen.
 
 In the TUI, `/monofold:focus` selects Active Focus from a list of preset labels. The default shortcut `ctrl+shift+m` cycles Active Focus forward and `shift+ctrl+f` cycles backward through `focusPresets` YAML order; the footer status shows `focus: <label> (n/N) ctrl+shift+m / shift+ctrl+f`. `/monofold:focus-prev` mirrors the backward shortcut for discoverability.
 
@@ -101,6 +107,26 @@ Optional `focusSkills` on a preset declares up to six Pi skill names to expose a
 
 `monofold_list` shows declared `focusSkills` for the active preset alongside route override and health warnings.
 
+
+### decisionNoteDestination
+
+Optional `decisionNoteDestination` on a preset points Active Focus at one reusable Markdown file for decision capture.
+
+- Declare `targetTags` plus a workspace-internal `path` to a single note file (for example a rolling decision log).
+- Monofold resolves that one workspace target and surfaces the destination in `monofold_list`, footer status, and Focus Context Injection.
+- When the file exists, its bounded preview is injected alongside other focus context files.
+- Missing workspaces fail config validation. Missing files stay a visible runtime warning and otherwise no-op.
+
+**When to use `decisionNoteDestination`:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Control/project preset with one rolling decision log | Enable with a stable path you reuse across sessions. |
+| One-off routed decision writes | Omit; use `monofold_write` with `routeType: decision` instead. |
+| Broad journaling or multi-file note sync | Out of scope; keep manual writes or external tooling. |
+
+This differs from ordinary note-taking because Monofold only exposes the configured destination for the active preset. It does not scan workspaces, auto-create hidden notes, or replace explicit `monofold_write` routes.
+
 ### defaultRouteOverride
 
 Optional `defaultRouteOverride` on a preset biases Monofold write flows toward a configured route type while that preset is Active Focus.
@@ -115,7 +141,7 @@ Run `monofold_list` (or rely on the injected manifest) to inspect Focus health b
 - current Active Focus preset and YAML position
 - `defaultRouteOverride` when declared
 - invalid `targetTags`, duplicate selectors, or capability/route mismatches fail config validation before Focus activation
-- runtime health warnings such as missing `focusSkills` names (when Pi skill inventory is available)
+- runtime health warnings such as missing `focusSkills` names (when Pi skill inventory is available) or unavailable `decisionNoteDestination` files
 
 The health block stays compact and does not dump raw internal state.
 - Precedence: explicit `routeType` on `monofold_write` or `--route` on `/monofold:write` always wins; when omitted, Active Focus `defaultRouteOverride` is used; otherwise Monofold falls back to `default`.

@@ -1,5 +1,11 @@
 import { type FocusSessionLoadResult } from "./focus-session-state.js";
 import { type MonofoldRouteType, parseDefaultRouteOverride } from "./focus-route-override.js";
+import {
+  parseDecisionNoteDestination,
+  resetDecisionNoteWarningState,
+  validateDecisionNoteDestinationAgainstWorkspaces,
+  type FocusDecisionNoteDestination,
+} from "./focus-decision-note.js";
 import { parseFocusSkills, resetFocusSkillsWarningState } from "./focus-skills.js";
 import { assertKnownKeys, asStringArray, isRecord, uniqueStrings } from "./validation.js";
 
@@ -13,6 +19,7 @@ export type FocusPreset = {
   targets: FocusPresetTarget[];
   focusSkills?: string[];
   defaultRouteOverride?: MonofoldRouteType;
+  decisionNoteDestination?: FocusDecisionNoteDestination;
 };
 
 export type FocusMatchableWorkspace = {
@@ -26,7 +33,14 @@ export type FocusPresetValidationWorkspace = FocusMatchableWorkspace & {
   routeTypes: readonly string[];
 };
 
-const FOCUS_PRESET_KEYS = new Set(["id", "label", "targets", "focusSkills", "defaultRouteOverride"]);
+const FOCUS_PRESET_KEYS = new Set([
+  "id",
+  "label",
+  "targets",
+  "focusSkills",
+  "defaultRouteOverride",
+  "decisionNoteDestination",
+]);
 const FOCUS_PRESET_TARGET_KEYS = new Set(["targetTags"]);
 
 /** Parses and validates focus preset configuration from YAML/JSON input. */
@@ -63,6 +77,7 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
     }
     const focusSkills = parseFocusSkills(itemLabel, item.focusSkills);
     const defaultRouteOverride = parseDefaultRouteOverride(itemLabel, item.defaultRouteOverride);
+    const decisionNoteDestination = parseDecisionNoteDestination(itemLabel, item.decisionNoteDestination);
     if (seenIds.has(item.id)) throw new Error(`${label} has duplicate preset id: ${item.id}`);
     seenIds.add(item.id);
     presets.push({
@@ -71,6 +86,7 @@ export function parseFocusPresets(value: unknown, label = "focusPresets"): Focus
       targets,
       ...(focusSkills !== undefined ? { focusSkills } : {}),
       ...(defaultRouteOverride !== undefined ? { defaultRouteOverride } : {}),
+      ...(decisionNoteDestination !== undefined ? { decisionNoteDestination } : {}),
     });
   }
   return presets;
@@ -149,6 +165,10 @@ export function validateFocusPresetsAgainstWorkspaces(
           }
         }
       }
+    }
+
+    if (preset.decisionNoteDestination) {
+      validateDecisionNoteDestinationAgainstWorkspaces(presetLabel, preset.decisionNoteDestination, workspaces);
     }
   }
 }
@@ -263,6 +283,7 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   activeFocusInitialized = true;
   clearActiveFocusInitSource();
   resetFocusSkillsWarningState();
+  resetDecisionNoteWarningState();
 }
 
 export type ActiveFocusPresetPosition = {
@@ -343,6 +364,7 @@ export function clearActiveFocusPresetId(): void {
   activeFocusInitialized = true;
   clearActiveFocusInitSource();
   resetFocusSkillsWarningState();
+  resetDecisionNoteWarningState();
 }
 
 /** Resets in-memory session state (for tests and process restart). */
@@ -351,6 +373,7 @@ export function resetActiveFocusSessionState(): void {
   activeFocusInitialized = false;
   activeFocusInitSource = null;
   resetFocusSkillsWarningState();
+  resetDecisionNoteWarningState();
 }
 
 export type TagBasedTargetInput = {

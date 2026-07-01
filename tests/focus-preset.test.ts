@@ -94,6 +94,33 @@ describe("parseFocusPresets", () => {
     );
   });
 
+  it("accepts optional decisionNoteDestination", () => {
+    assert.deepEqual(
+      parseFocusPresets([
+        {
+          id: "control",
+          label: "Control",
+          decisionNoteDestination: {
+            targetTags: ["control"],
+            path: "Decisions/ACTIVE.md",
+          },
+          targets: [{ targetTags: ["control"] }],
+        },
+      ]),
+      [
+        {
+          id: "control",
+          label: "Control",
+          decisionNoteDestination: {
+            targetTags: ["control"],
+            path: "Decisions/ACTIVE.md",
+          },
+          targets: [{ targetTags: ["control"] }],
+        },
+      ],
+    );
+  });
+
   it("accepts optional focusSkills", () => {
     assert.deepEqual(
       parseFocusPresets([

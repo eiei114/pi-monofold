@@ -77,7 +77,9 @@ Optional `focusPresets` define tag-based focus targets for the control workspace
 - Each target uses `targetTags`, matching workspace tags the same way as other Monofold target selectors.
 - Targets that match zero configured workspaces are allowed in config and emit a runtime warning when the active preset is applied.
 
-Active focus (the selected preset id) lives in extension session memory only. It resets when Pi restarts. When `focusPresets` is non-empty, the first preset in YAML order becomes active at session start unless a later slice changes it.
+Active focus (the selected preset id) is persisted in `.pi/monofold-focus-session.json` for the Control Repository. When Pi starts a new session in the same Control Repository, Monofold restores the saved preset when it still exists in `focusPresets`; otherwise it falls back to the first preset in YAML order. A malformed session-state file or a deleted preset id does not block startup. When the saved state is explicitly cleared (`activeFocusPresetId: null`), Active Focus stays unset across restarts.
+
+Footer status and manifest output append `[restored]`, `[stale save, using default]`, or `[using default]` when applicable so you can tell whether Focus was restored or freshly chosen.
 
 In the TUI, `/monofold:focus` selects Active Focus from a list of preset labels. The default shortcut `ctrl+shift+m` cycles Active Focus forward and `shift+ctrl+f` cycles backward through `focusPresets` YAML order; the footer status shows `focus: <label> (n/N) ctrl+shift+m / shift+ctrl+f`. `/monofold:focus-prev` mirrors the backward shortcut for discoverability.
 

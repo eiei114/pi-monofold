@@ -86,7 +86,7 @@ pi -e npm:pi-monofold
 1. Install the extension (see [Install](#install)).
 2. In your control repository, create `.pi/monofold.yaml` with at least one workspace entry (or run `/monofold:init`).
 3. Start Pi in the control repository and run `/monofold:explore show the project workspaces`.
-4. Use `/monofold:focus`, `ctrl+shift+m`, or `shift+ctrl+f` to switch focus presets when `focusPresets` are configured.
+4. Use `/monofold:focus`, `ctrl+shift+m`, or `shift+ctrl+f` to switch focus presets when `focusPresets` are configured. Active Focus is restored automatically on the next Pi session in the same control repository.
 5. Use `/monofold:write` for routed Markdown outputs and `/monofold:git` for guarded git workflows.
 
 Example command flows: [docs/examples.md](./docs/examples.md).

@@ -2,6 +2,8 @@
 
 ### Added
 
+- Cross-session Active Focus restore via `.pi/monofold-focus-session.json`, with safe fallback when saved state is missing, malformed, or stale.
+- Footer status and manifest output show whether Active Focus was restored, fell back to default, or used a stale saved preset.
 - `monofold_list` now includes a compact **Active Focus Health** block (preset, route override, unresolved targets, and validation warnings) as the first-line Focus status surface.
 
 ### Changed

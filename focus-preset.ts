@@ -1,3 +1,4 @@
+import { type FocusSessionLoadResult } from "./focus-session-state.js";
 import { type MonofoldRouteType, parseDefaultRouteOverride } from "./focus-route-override.js";
 import {
   parseDecisionNoteDestination,
@@ -213,14 +214,59 @@ export function warnZeroTargetMatchesForPreset(
   }
 }
 
+export type ActiveFocusInitSource = "restored" | "default" | "stale" | "cleared" | "malformed";
+
 let activeFocusPresetId: string | null = null;
 let activeFocusInitialized = false;
+let activeFocusInitSource: ActiveFocusInitSource | null = null;
+
+/** Returns how the current session initialized Active Focus, when applicable. */
+export function getActiveFocusInitSource(): ActiveFocusInitSource | null {
+  return activeFocusInitSource;
+}
+
+/** Returns true after Active Focus has been initialized for this Pi session. */
+export function isActiveFocusSessionInitialized(): boolean {
+  return activeFocusInitialized;
+}
+
+function clearActiveFocusInitSource(): void {
+  activeFocusInitSource = null;
+}
+
+/** Applies persisted or default Active Focus once per Pi session. */
+export function applyActiveFocusSession(
+  focusPresets: FocusPreset[] | undefined,
+  persisted: FocusSessionLoadResult = { kind: "missing" },
+): void {
+  if (activeFocusInitialized) return;
+  activeFocusInitialized = true;
+  const presets = focusPresets ?? [];
+
+  if (persisted.kind === "loaded") {
+    const savedId = persisted.activeFocusPresetId;
+    if (savedId === null) {
+      activeFocusPresetId = null;
+      activeFocusInitSource = "cleared";
+      return;
+    }
+    if (findFocusPresetById(presets, savedId)) {
+      activeFocusPresetId = savedId;
+      activeFocusInitSource = "restored";
+      return;
+    }
+    activeFocusPresetId = pickDefaultFocusPresetId(presets);
+    activeFocusInitSource = "stale";
+    return;
+  }
+
+  activeFocusPresetId = pickDefaultFocusPresetId(presets);
+  activeFocusInitSource = persisted.kind === "malformed" ? "malformed" : "default";
+}
 
 /** Initializes the active focus preset once per process/session. */
 export function ensureActiveFocusInitialized(focusPresets: FocusPreset[] | undefined): void {
-  if (activeFocusInitialized) return;
-  activeFocusInitialized = true;
-  activeFocusPresetId = pickDefaultFocusPresetId(focusPresets);
+  applyActiveFocusSession(focusPresets, { kind: "missing" });
 }
 
 /** Returns the current active focus preset id, if any. */
@@ -235,6 +281,7 @@ export function setActiveFocusPresetId(id: string, focusPresets: FocusPreset[] |
   }
   activeFocusPresetId = id;
   activeFocusInitialized = true;
+  clearActiveFocusInitSource();
   resetFocusSkillsWarningState();
   resetDecisionNoteWarningState();
 }
@@ -315,6 +362,7 @@ export function cycleActiveFocusPresetBackward(focusPresets: FocusPreset[] | und
 export function clearActiveFocusPresetId(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = true;
+  clearActiveFocusInitSource();
   resetFocusSkillsWarningState();
   resetDecisionNoteWarningState();
 }
@@ -323,6 +371,7 @@ export function clearActiveFocusPresetId(): void {
 export function resetActiveFocusSessionState(): void {
   activeFocusPresetId = null;
   activeFocusInitialized = false;
+  activeFocusInitSource = null;
   resetFocusSkillsWarningState();
   resetDecisionNoteWarningState();
 }

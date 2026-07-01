@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import {
+  applyActiveFocusSession,
   clearActiveFocusPresetId,
   countMatchingWorkspaces,
   cycleActiveFocusPresetBackward,
   cycleActiveFocusPresetForward,
   ensureActiveFocusInitialized,
+  getActiveFocusInitSource,
   getActiveFocusPresetId,
   parseFocusPresets,
   pickDefaultFocusPresetId,
@@ -230,7 +232,7 @@ describe("active focus session state", () => {
     assert.equal(getActiveFocusPresetId(), null);
   });
 
-  it("supports set and clear without persisting across resets", () => {
+  it("supports set and clear without persisting across in-memory resets", () => {
     ensureActiveFocusInitialized(samplePresets);
     setActiveFocusPresetId("docs", samplePresets);
     assert.equal(getActiveFocusPresetId(), "docs");
@@ -348,6 +350,30 @@ const sampleWorkspaces = [
     routeTypes: ["default", "progress"],
   },
 ];
+
+describe("applyActiveFocusSession", () => {
+  beforeEach(() => {
+    resetActiveFocusSessionState();
+  });
+
+  it("restores a valid saved preset id", () => {
+    applyActiveFocusSession(samplePresets, { kind: "loaded", activeFocusPresetId: "docs" });
+    assert.equal(getActiveFocusPresetId(), "docs");
+    assert.equal(getActiveFocusInitSource(), "restored");
+  });
+
+  it("uses default when saved preset id is stale", () => {
+    applyActiveFocusSession(samplePresets, { kind: "loaded", activeFocusPresetId: "missing" });
+    assert.equal(getActiveFocusPresetId(), "control");
+    assert.equal(getActiveFocusInitSource(), "stale");
+  });
+
+  it("honors an explicitly cleared saved state", () => {
+    applyActiveFocusSession(samplePresets, { kind: "loaded", activeFocusPresetId: null });
+    assert.equal(getActiveFocusPresetId(), null);
+    assert.equal(getActiveFocusInitSource(), "cleared");
+  });
+});
 
 describe("validateFocusPresetsAgainstWorkspaces", () => {
   it("accepts valid presets against configured workspaces", () => {

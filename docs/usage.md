@@ -125,6 +125,16 @@ Optional `decisionNoteDestination` on a preset points Active Focus at one reusab
 | One-off routed decision writes | Omit; use `monofold_write` with `routeType: decision` instead. |
 | Broad journaling or multi-file note sync | Out of scope; keep manual writes or external tooling. |
 
+**When to use `decisionNoteDestination` (dogfood recommendation):**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Control/project preset with one rolling decision log | Enable with a stable path you reuse across sessions. `monofold_list` and footer status show the destination and availability. |
+| Reusable decision log for a second preset (for example pi-monofold) | Add a second `decisionNoteDestination` on a different preset with workspace-targeting tags matching a different workspace; focus cycling switches the injected note file. |
+| One-off routed decision writes | Omit; use `monofold_write` with `routeType: decision` instead. |
+| Broad journaling or multi-file note sync | Out of scope; keep manual writes or external tooling. `decisionNoteDestination` is for one reusable file per preset. |
+| Preset with no ongoing decision log | Omit; leaving it unset avoids prompt noise without any loss of functionality. |
+
 This differs from ordinary note-taking because Monofold only exposes the configured destination for the active preset. It does not scan workspaces, auto-create hidden notes, or replace explicit `monofold_write` routes.
 
 ### defaultRouteOverride

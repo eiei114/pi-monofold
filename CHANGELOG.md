@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
+
 ### Added
 
 - Cross-session Active Focus restore via `.pi/monofold-focus-session.json`, with safe fallback when saved state is missing, malformed, or stale.
@@ -114,3 +116,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - prior release
 
 See git history and GitHub releases for earlier changes.
+

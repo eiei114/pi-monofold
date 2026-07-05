@@ -20,6 +20,7 @@ See [docs/usage.md](./docs/usage.md) for configuration, commands, agent tools, a
 ## Features
 
 - **Virtual monorepo manifest** — declare workspaces and project workspaces in `.pi/monofold.yaml`
+- **Multi-runtime path overlays** — keep one logical workspace definition while swapping absolute repo roots per runtime
 - **Routed Markdown writes** — route PRDs, progress notes, and other doc types to configured folders
 - **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces, with bounded previews by default
 - **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags

@@ -64,10 +64,26 @@ workspaces:
 
   - name: "Application"
     path: "../app"
+    pathOverlays:
+      mac-eiei114: /Users/eiei114/IMspace/oss/app
+      win-keisu: C:/Users/Keisu/Projects/OSS/app
     tags: [development, app]
     capabilities: [read, editCode, runCommands, git]
     contextFiles: [README.md, AGENTS.md]
 ```
+
+## Runtime path overlays
+
+Optional `pathOverlays` lets one logical workspace resolve to different absolute roots on different runtimes.
+
+- Keys are runtime IDs such as `mac-eiei114` or `win-keisu`.
+- Values must be absolute paths.
+- Pi Monofold resolves the current runtime from `PI_MONOFOLD_RUNTIME` / `MONOFOLD_RUNTIME` when set, otherwise auto-detects a stable local id like `mac-<username>` or `win-<username>`.
+- When `pathOverlays[activeRuntime]` exists, Monofold uses that path as the effective workspace root.
+- When no overlay matches, Monofold falls back to the base `path`.
+- Inactive runtime overlays do not fail validation just because those paths do not exist on the current machine.
+
+Use this when one control repo is shared across multiple machines or OS-specific runtimes, but the same development repo lives at different absolute paths locally.
 
 ## Focus presets
 

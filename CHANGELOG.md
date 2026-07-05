@@ -1,6 +1,20 @@
 ## Unreleased
 
+### Added
+
 - Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
+
+## [0.12.0] - 2026-07-05
+
+### Added
+
+- Optional workspace `pathOverlays` for multi-runtime configs, so one logical workspace can resolve to different absolute roots on different machines.
+- Active runtime detection via `PI_MONOFOLD_RUNTIME` / `MONOFOLD_RUNTIME` override or auto-detected local runtime id.
+- `monofold_list` now shows the active runtime and whether each resolved workspace path came from an overlay or the base path.
+
+### Changed
+
+- Manifest validation now checks only the active runtime's resolved workspace path, so inactive-machine overlay paths no longer break the current runtime.
 
 ### Added
 

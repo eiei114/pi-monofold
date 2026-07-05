@@ -2,6 +2,7 @@
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { access, copyFile, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -69,9 +70,12 @@ type RouteConfig = {
   metadata?: Record<string, unknown>;
 };
 
+type RuntimePathOverlayMap = Record<string, string>;
+
 type WorkspaceConfig = {
   name?: string;
   path: string;
+  pathOverlays?: RuntimePathOverlayMap;
   tags: string[];
   capabilities: CapabilityTag[];
   contextFiles?: string[];
@@ -111,6 +115,14 @@ type ResolvedWorkspace = WorkspaceConfig & {
   normalizedRoutes: Partial<Record<RouteType, RouteConfig>>;
   effectiveContextFiles: string[];
   commitScope?: string;
+  runtimePathSource: "base" | "overlay";
+  runtimeResolvedPath: string;
+  activeRuntimeId: string;
+};
+
+type RuntimeInfo = {
+  id: string;
+  source: "env" | "detected";
 };
 
 type LoadedConfig = {
@@ -118,6 +130,7 @@ type LoadedConfig = {
   root: string;
   raw: MultiWorkspaceConfig;
   workspaces: ResolvedWorkspace[];
+  activeRuntime: RuntimeInfo;
 };
 
 type TargetInput = {
@@ -189,9 +202,11 @@ const CODE_EXTENSIONS = new Set([
   ".scss",
   ".html",
 ]);
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\/]/;
+const UNC_ABSOLUTE_PATH_RE = /^\\[^\\]+\\[^\\]+/;
 const ROOT_KEYS = new Set(["version", "defaults", "focusPresets", "workspaces"]);
 const DEFAULT_KEYS = new Set(["contextFiles", "filenameTemplate", "metadata"]);
-const WORKSPACE_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes", "projects"]);
+const WORKSPACE_KEYS = new Set(["name", "path", "pathOverlays", "tags", "capabilities", "contextFiles", "routes", "projects"]);
 const PROJECT_KEYS = new Set(["name", "path", "tags", "capabilities", "contextFiles", "routes"]);
 const ROUTE_KEYS = new Set(["path", "filenameTemplate", "metadata"]);
 const FOCUS_STATUS_ID = "monofold-focus";
@@ -216,6 +231,50 @@ type FocusContextInjection = {
 
 function normalizeSlashes(value: string): string {
   return value.replace(/\\/g, "/");
+}
+
+function normalizeRuntimeId(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "runtime";
+}
+
+function isPortableAbsolutePath(value: string): boolean {
+  return path.isAbsolute(value) || WINDOWS_ABSOLUTE_PATH_RE.test(value) || UNC_ABSOLUTE_PATH_RE.test(value);
+}
+
+function resolvePortablePath(root: string, configuredPath: string): string {
+  return isPortableAbsolutePath(configuredPath) ? configuredPath : path.resolve(root, configuredPath);
+}
+
+function detectActiveRuntime(): RuntimeInfo {
+  const explicit = process.env.PI_MONOFOLD_RUNTIME ?? process.env.MONOFOLD_RUNTIME;
+  if (typeof explicit === "string" && explicit.trim().length > 0) {
+    return { id: normalizeRuntimeId(explicit), source: "env" };
+  }
+  const platform = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "win" : process.platform;
+  let username = "user";
+  try {
+    username = userInfo().username || username;
+  } catch {
+    // ignore userInfo failures and keep fallback username
+  }
+  return { id: `${platform}-${normalizeRuntimeId(username)}`, source: "detected" };
+}
+
+function asPathOverlayMap(label: string, value: unknown): RuntimePathOverlayMap | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  const normalized: RuntimePathOverlayMap = {};
+  for (const [runtimeId, overlayPath] of Object.entries(value)) {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (typeof overlayPath !== "string" || overlayPath.trim().length === 0) {
+      throw new Error(`${label}.${runtimeId} must be a non-empty string path`);
+    }
+    if (!isPortableAbsolutePath(overlayPath)) {
+      throw new Error(`${label}.${runtimeId} must be an absolute path: ${overlayPath}`);
+    }
+    normalized[normalizedRuntimeId] = overlayPath;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function isInside(parent: string, child: string): boolean {
@@ -370,6 +429,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
   const defaultFilenameTemplate = typeof defaults?.filenameTemplate === "string" ? defaults.filenameTemplate : undefined;
   const defaultMetadata = isRecord(defaults?.metadata) ? (defaults.metadata as Record<string, unknown>) : undefined;
   const focusPresets = parseFocusPresets(parsed.focusPresets, "focusPresets");
+  const activeRuntime = detectActiveRuntime();
 
   const workspaces: ResolvedWorkspace[] = [];
   for (let index = 0; index < parsed.workspaces.length; index += 1) {
@@ -378,6 +438,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
     assertKnownKeys(`workspaces[${index}]`, item, WORKSPACE_KEYS);
     if (item.name !== undefined && typeof item.name !== "string") throw new Error(`workspaces[${index}].name must be string`);
     if (typeof item.path !== "string") throw new Error(`workspaces[${index}].path is required`);
+    const pathOverlays = asPathOverlayMap(`workspaces[${index}].pathOverlays`, item.pathOverlays);
     const tags = asStringArray(`workspaces[${index}].tags`, item.tags);
     const capabilities = asCapabilityArray(item.capabilities);
     const contextFiles = asStringArray(`workspaces[${index}].contextFiles`, item.contextFiles, false);
@@ -402,13 +463,19 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
       }
     }
 
-    const resolvedPath = path.resolve(cwd, item.path);
-    const realPath = await existingRealPath(`workspaces[${index}].path`, resolvedPath);
+    const runtimeOverlayPath = pathOverlays?.[activeRuntime.id];
+    const runtimePathSource = runtimeOverlayPath ? "overlay" : "base";
+    const resolvedPath = resolvePortablePath(cwd, runtimeOverlayPath ?? item.path);
+    const realPath = await existingRealPath(
+      runtimePathSource === "overlay" ? `workspaces[${index}].pathOverlays.${activeRuntime.id}` : `workspaces[${index}].path`,
+      resolvedPath,
+    );
     const workspace: ResolvedWorkspace = {
       kind: "workspace",
       targetId: `#${index}`,
       name: item.name as string | undefined,
       path: item.path,
+      pathOverlays,
       displayPath: item.path,
       tags: uniqueStrings(tags),
       capabilities,
@@ -419,6 +486,9 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
       realPath,
       normalizedRoutes,
       effectiveContextFiles: [...defaultContextFiles, ...contextFiles],
+      runtimePathSource,
+      runtimeResolvedPath: resolvedPath,
+      activeRuntimeId: activeRuntime.id,
     };
     workspaces.push(workspace);
 
@@ -481,6 +551,9 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
         normalizedRoutes: projectNormalizedRoutes,
         effectiveContextFiles: [...defaultContextFiles, ...contextFiles, ...projectContextFiles],
         commitScope: normalizeSlashes(path.relative(resolvedPath, projectResolvedPath)),
+        runtimePathSource,
+        runtimeResolvedPath: projectResolvedPath,
+        activeRuntimeId: activeRuntime.id,
       });
     }
   }
@@ -512,6 +585,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
       workspaces: workspaces.filter((workspace) => workspace.kind === "workspace"),
     },
     workspaces,
+    activeRuntime,
   };
 }
 
@@ -1171,11 +1245,13 @@ async function gitRoot(workspace: ResolvedWorkspace): Promise<string | undefined
 
 async function buildFullWorkspaceManifestEntry(workspace: ResolvedWorkspace, suffix = ""): Promise<string> {
   const git = await gitSummary(workspace).catch((error) => ({ isGit: false, status: `git status error: ${String(error)}` }));
+  const runtimeSuffix = workspace.runtimePathSource === "overlay" ? " (overlay)" : " (base)";
   return (
     `- ${formatWorkspaceLabel(workspace)}${suffix}\n` +
     `  capabilities: ${workspace.capabilities.join(", ")}\n` +
     `  routes: ${Object.keys(workspace.normalizedRoutes).join(", ") || "none"}\n` +
     `  contextFiles: ${workspace.effectiveContextFiles.join(", ") || "none"}\n` +
+    `  runtimePath: ${normalizeSlashes(workspace.runtimeResolvedPath)}${runtimeSuffix}\n` +
     `  git: ${git.isGit ? git.status : "not a git repository"}`
   );
 }
@@ -1186,6 +1262,7 @@ async function buildManifest(
 ): Promise<string> {
   await ensureActiveFocusReady(loaded);
   const lines = ["Pi Monofold Manifest:"];
+  lines.push(`Active runtime: ${loaded.activeRuntime.id}${loaded.activeRuntime.source === "env" ? " [env]" : " [detected]"}`);
   const activePreset = getActiveFocusPreset(loaded);
   const position = getActiveFocusPresetPosition(loaded.raw.focusPresets);
   if (activePreset && position) {

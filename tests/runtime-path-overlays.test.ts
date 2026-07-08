@@ -52,6 +52,15 @@ function ctx(cwd: string) {
   };
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function manifestRuntimePathRegex(absolutePath: string, source: "overlay" | "base"): RegExp {
+  const normalized = absolutePath.replace(/\\/g, "/");
+  return new RegExp(`runtimePath: ${escapeRegex(normalized)} \\(${source}\\)`);
+}
+
 describe("runtime path overlays", () => {
   it("uses the active runtime overlay for list, read, write, and git", async () => {
     process.env.PI_MONOFOLD_RUNTIME = "mac-eiei114";
@@ -84,7 +93,7 @@ workspaces:
     const listResult = await list.execute("1", {}, undefined, undefined, ctx(root));
     const manifest = listResult.content[0]!.text;
     assert.match(manifest, /Active runtime: mac-eiei114 \[env\]/);
-    assert.match(manifest, new RegExp(`runtimePath: ${overlayRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(overlay\\)`));
+    assert.match(manifest, manifestRuntimePathRegex(overlayRoot, "overlay"));
 
     const readResult = await read.execute(
       "1",
@@ -147,7 +156,45 @@ workspaces:
     const listResult = await list.execute("1", {}, undefined, undefined, ctx(root));
     const manifest = listResult.content[0]!.text;
     assert.match(manifest, /Active runtime: linux-other \[env\]/);
-    assert.match(manifest, new RegExp(`runtimePath: ${baseRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(base\\)`));
+    assert.match(manifest, manifestRuntimePathRegex(baseRoot, "base"));
+
+    const readResult = await read.execute(
+      "1",
+      { mode: "file", path: "README.md", targetTags: ["development", "pi-monofold"] },
+      undefined,
+      undefined,
+      ctx(root),
+    );
+    assert.match(readResult.content[0]!.text, /README from base-dev/);
+  });
+
+  it("does not fail validation when inactive overlay paths are missing on this machine", async () => {
+    process.env.PI_MONOFOLD_RUNTIME = "win-keisu";
+    const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-inactive-overlay-"));
+    const baseRoot = await makeWorkspace(root, "base-dev");
+    await writeConfig(
+      root,
+      `version: 1
+workspaces:
+  - name: Dev Repo
+    path: ./base-dev
+    pathOverlays:
+      mac-missing-only: /Users/nobody/this/path/does/not/exist/on/windows
+    tags: [development, pi-monofold]
+    capabilities: [read]
+    contextFiles: [README.md]
+`,
+    );
+
+    const { tools } = loadExtension();
+    const list = tools.get("monofold_list");
+    const read = tools.get("monofold_read");
+    assert.ok(list && read);
+
+    const listResult = await list.execute("1", {}, undefined, undefined, ctx(root));
+    const manifest = listResult.content[0]!.text;
+    assert.match(manifest, /Active runtime: win-keisu \[env\]/);
+    assert.match(manifest, manifestRuntimePathRegex(baseRoot, "base"));
 
     const readResult = await read.execute(
       "1",

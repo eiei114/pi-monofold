@@ -34,7 +34,11 @@ shift+ctrl+f
 
 Use `monofold_list` first to inspect Active Focus health (preset, route override, declared `focusSkills`, decision-note destination, unresolved targets, and warnings).
 
-See also: [focus-skills-dogfood.md](./focus-skills-dogfood.md) for a bounded dogfood review of the control + project/dev preset pair.
+See also:
+
+- [focus-skills-dogfood.md](./focus-skills-dogfood.md) — bounded dogfood review of `focusSkills`
+- [focus-decision-note-dogfood.md](./focus-decision-note-dogfood.md) — bounded dogfood review of `decisionNoteDestination`
+- [design-focus-preset.md](./design-focus-preset.md) — Focus preset design including decision-note capture
 
 `/monofold:focus` opens a TUI selector by preset label. `ctrl+shift+m` cycles Active Focus forward and `shift+ctrl+f` (or `/monofold:focus-prev`) cycles backward through `focusPresets` YAML order.
 

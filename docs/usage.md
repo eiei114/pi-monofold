@@ -151,7 +151,7 @@ Optional `decisionNoteDestination` on a preset points Active Focus at one reusab
 | Broad journaling or multi-file note sync | Out of scope; keep manual writes or external tooling. `decisionNoteDestination` is for one reusable file per preset. |
 | Preset with no ongoing decision log | Omit; leaving it unset avoids prompt noise without any loss of functionality. |
 
-This differs from ordinary note-taking because Monofold only exposes the configured destination for the active preset. It does not scan workspaces, auto-create hidden notes, or replace explicit `monofold_write` routes.
+This differs from ordinary note-taking because Monofold only exposes the configured destination for the active preset. It does not scan workspaces, auto-create hidden notes, or replace explicit `monofold_write` routes. Design background: [design-focus-preset.md](./design-focus-preset.md).
 
 ### defaultRouteOverride
 

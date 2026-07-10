@@ -40,8 +40,8 @@
     "typebox": "^1.1.38",
     "@types/node": "^25.9.1",
     "tsx": "^4.20.5",
-    "@earendil-works/pi-coding-agent": "^0.75.4",
-    "@earendil-works/pi-ai": "^0.75.4"
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-ai": "^0.80.6"
   },
   "dependencies": {
     "yaml": "^2.8.1"

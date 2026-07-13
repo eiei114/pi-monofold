@@ -4,6 +4,16 @@
 
 - Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
 
+## [0.12.1] - 2026-07-13
+
+### Added
+
+- Post-dogfood Focus context injection cap review (DOT-99): documented provisional caps in `docs/design-focus-preset.md` and recorded representative-session evidence in `docs/focus-context-injection-dogfood.md`.
+
+### Changed
+
+- Confirmed provisional injection caps unchanged (6 files / 6,000 chars per file / 12,000 total per turn); constants remain exported from `index.ts` for future tuning.
+
 ## [0.12.0] - 2026-07-05
 
 ### Added

@@ -1,6 +1,6 @@
-# decisionNoteDestination dogfood review (DOT-392)
+# decisionNoteDestination dogfood review (DOT-392, DOT-740)
 
-Review date: 2026-07-03. Feature landed in v0.10.0 (DOT-391). This note records a bounded dogfood pass across the documented control + project/dev preset pair.
+Review date: 2026-07-03 (DOT-392); replenishment verification 2026-07-08 (DOT-740). Feature landed in v0.10.0 (DOT-391). This note records a bounded dogfood pass across the documented control + project/dev preset pair.
 
 ## Presets reviewed
 
@@ -60,6 +60,18 @@ During the review I noticed that truncation of large decision notes and combined
    - Decision note + context files combined total cap behavior.
    - Removed dead redundant branching in `makeWorkspaceRoot`.
 2. **`docs/usage.md`** — added a when-to-enable recommendation table for `decisionNoteDestination` (matching the `focusSkills` pattern).
+
+## DOT-740 replenishment verification (2026-07-08)
+
+Weekly catalog entry `pi-monofold:focus-preset-decision-note` re-checked acceptance on `main` (v0.12.0):
+
+- [x] Preset declares one `decisionNoteDestination` — `focus-decision-note.ts`, `focus-preset.ts`
+- [x] Activation surfaces destination without workspace scanning — tag-targeted resolve + injection in `index.ts`
+- [x] Missing file/workspace → visible warning — `warnUnavailableDecisionNoteDestination`
+- [x] Control/project example in docs — `usage.md`, `examples.md`
+- [x] Tests: configured, missing, disabled — `focus-decision-note*.test.ts`
+
+Added `docs/design-focus-preset.md` to document the Focus preset model and decision-note boundaries for adopters.
 
 ## Follow-up (out of scope)
 

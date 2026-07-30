@@ -152,15 +152,46 @@ pi-monofold/
 │   ├── usage.md                    # Config, commands, agent API, guard
 │   ├── examples.md                 # Command examples
 │   └── release.md                  # Release and publish flow
+├── scripts/
+│   └── check-version-bump.mjs      # PR version bump guard (CI)
 ├── tests/
-│   └── focus-preset.test.ts
+│   ├── file-read-preview.test.ts
+│   ├── focus-command.test.ts
+│   ├── focus-context-injection.test.ts
+│   ├── focus-decision-note-integration.test.ts
+│   ├── focus-decision-note.test.ts
+│   ├── focus-inference-bias.test.ts
+│   ├── focus-preset.test.ts
+│   ├── focus-route-override-integration.test.ts
+│   ├── focus-route-override.test.ts
+│   ├── focus-session-restore.test.ts
+│   ├── focus-session-state.test.ts
+│   ├── focus-skills-auto-load.test.ts
+│   ├── focus-skills.test.ts
+│   ├── github-actions-pin.test.ts
+│   ├── monofold-read-caps.test.ts
+│   ├── monofold-read-ops.test.ts
+│   ├── path-normalize.test.ts
+│   ├── readme-package-contents.test.ts
+│   ├── readme-version-pin.test.ts
+│   ├── runtime-path-overlays.test.ts
+│   └── unknown-path-allows.test.ts
 ├── CHANGELOG.md
 ├── SECURITY.md
+├── file-read-preview.ts
+├── focus-decision-note.ts
 ├── focus-preset.ts
+├── focus-route-override.ts
+├── focus-session-state.ts
+├── focus-skills.ts
 ├── index.ts
 ├── LICENSE
+├── monofold-read-ops.ts
 ├── package.json
+├── path-normalize.ts
+├── read-caps.ts
 ├── README.md
+├── unknown-path-allows.ts
 ├── validation.ts
 └── tsconfig.json
 ```

@@ -29,8 +29,10 @@ describe("README package contents tree", () => {
   });
 
   it("documents the CI version bump guard script", () => {
-    assert.match(tree, /scripts\//);
-    assert.match(tree, /check-version-bump\.mjs/);
+    assert.match(
+      tree,
+      /├── scripts\/\n│   └── check-version-bump\.mjs\b/,
+    );
   });
 
   it("does not keep the stale single-test layout", () => {

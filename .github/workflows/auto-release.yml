@@ -69,9 +69,7 @@ jobs:
           if [ -n "$PREV_TAG" ]; then
             NOTES="${NOTES}\n\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
           fi
-          git tag "$TAG"
-          git push origin "$TAG"
-          gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

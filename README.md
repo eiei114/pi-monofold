@@ -52,7 +52,7 @@ pi install -l git:github.com/eiei114/pi-monofold
 Pin a version:
 
 ```powershell
-pi install git:github.com/eiei114/pi-monofold@v0.12.2
+pi install git:github.com/eiei114/pi-monofold@v0.12.3
 ```
 
 Try without installing:
@@ -76,7 +76,7 @@ pi install -l npm:pi-monofold
 Pin a version:
 
 ```powershell
-pi install npm:pi-monofold@0.12.2
+pi install npm:pi-monofold@0.12.3
 ```
 
 Try without installing:

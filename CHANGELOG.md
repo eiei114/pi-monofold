@@ -8,6 +8,12 @@
 
 - Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
 
+## [0.12.3] - 2026-08-04
+
+### Changed
+
+- Bump package version for the Discord release webhook verification.
+
 ## [0.12.1] - 2026-07-13
 
 ### Added

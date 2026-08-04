@@ -1,18 +1,21 @@
 ## Unreleased
 
-### Changed
-
-- Bump package version to `0.12.2` for the next patch release.
-
-### Added
-
-- Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
-
 ## [0.12.3] - 2026-08-04
 
 ### Changed
 
 - Bump package version for the Discord release webhook verification.
+
+## [0.12.2] - 2026-07-20
+
+### Changed
+
+- Sync README package contents tree with repository layout (DOT-1274).
+- Pin GitHub Actions `checkout` and `setup-node` to commit SHAs across CI and release workflows.
+
+### Added
+
+- Regression tests for README package contents tree and GitHub Actions workflow pins.
 
 ## [0.12.1] - 2026-07-13
 
@@ -46,6 +49,12 @@
 
 - `monofold_list` Active Focus health now lists declared `focusSkills` for the active preset.
 - Documented dogfood recommendations for when to enable `focusSkills`, including the all-declared-names-missing case (`docs/usage.md`, `docs/focus-skills-dogfood.md`).
+
+## [0.11.1] - 2026-07-04
+
+### Added
+
+- Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
 
 ## [0.10.0] - 2026-07-02
 

@@ -170,6 +170,7 @@ pi-monofold/
 │   ├── focus-session-state.test.ts
 │   ├── focus-skills-auto-load.test.ts
 │   ├── focus-skills.test.ts
+│   ├── changelog-hygiene.test.ts
 │   ├── github-actions-pin.test.ts
 │   ├── monofold-read-caps.test.ts
 │   ├── monofold-read-ops.test.ts

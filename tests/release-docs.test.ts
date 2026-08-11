@@ -7,22 +7,21 @@ describe("release docs match CI", () => {
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
   it("documents version:check when CI runs it on pull requests", () => {
-    const ciRunsVersionCheck =
-      /version:check/.test(ci) && /pull_request/.test(ci) && /github\.event_name\s*==\s*'pull_request'/.test(ci);
-
-    if (!ciRunsVersionCheck) {
-      return;
-    }
+    assert.match(
+      ci,
+      /- name: Verify version bump policy[\s\S]*?if:\s*github\.event_name\s*==\s*'pull_request'[\s\S]*?run:\s*npm run version:check/,
+      "ci.yml should run npm run version:check on PRs",
+    );
 
     assert.match(
       release,
-      /version:check/,
+      /## Pull request validation[\s\S]*?npm run version:check/,
       "docs/release.md must document npm run version:check when ci.yml runs it on PRs",
     );
     assert.match(
       release,
-      /check-version-bump\.mjs/,
-      "docs/release.md should point contributors at scripts/check-version-bump.mjs",
+      /## Pull request validation[\s\S]*?check-version-bump\.mjs/,
+      "docs/release.md should point contributors at scripts/check-version-bump.mjs in the PR validation section",
     );
   });
 

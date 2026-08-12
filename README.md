@@ -176,6 +176,7 @@ pi-monofold/
 │   ├── monofold-read-ops.test.ts
 │   ├── path-normalize.test.ts
 │   ├── readme-package-contents.test.ts
+│   ├── release-docs.test.ts
 │   ├── readme-version-pin.test.ts
 │   ├── runtime-path-overlays.test.ts
 │   └── unknown-path-allows.test.ts

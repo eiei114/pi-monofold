@@ -1,5 +1,11 @@
 ## Unreleased
 
+## [0.12.4] - 2026-08-22
+
+### Changed
+
+- Merge the 2026-08-22 managed OSS dependency and maintenance PR batch.
+
 ## [0.12.3] - 2026-08-04
 
 ### Changed

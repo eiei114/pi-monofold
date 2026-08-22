@@ -12,7 +12,7 @@
   },
   "description": "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
   "type": "module",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "pi": {
     "extensions": [
       "./index.ts"

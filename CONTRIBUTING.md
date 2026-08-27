@@ -27,11 +27,11 @@ Before opening a PR:
 
 ## Release
 
-Releases publish **`pi-monofold`** to npm through Trusted Publishing. Do not add `NPM_TOKEN` to GitHub Secrets.
+Releases publish **`pi-monofold`** to npm through Trusted Publishing after merge to `main`. Do not add `NPM_TOKEN` to GitHub Secrets.
 
-```bash
-npm version patch
-git push
-```
+1. Update `CHANGELOG.md` with the new version and date.
+2. Bump `version` in `package.json`.
+3. Open a PR and ensure CI passes (including `npm run version:check` when you bump the version).
+4. Merge to `main`. **Auto Release** tags `v<version>` and **Publish** publishes to npm with OIDC provenance.
 
-See `docs/release.md` for release notes and Trusted Publisher settings.
+See [docs/release.md](./docs/release.md) for the full release flow and Trusted Publisher settings.

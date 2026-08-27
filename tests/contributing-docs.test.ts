@@ -9,8 +9,13 @@ describe("CONTRIBUTING docs match release flow", () => {
   it("documents PR-based release instead of direct npm version push", () => {
     assert.doesNotMatch(
       contributing,
-      /npm version patch/,
-      "CONTRIBUTING.md must not instruct npm version patch; releases go through PR merge",
+      /\bnpm version\b/,
+      "CONTRIBUTING.md must not instruct direct npm version releases; releases go through PR merge",
+    );
+    assert.doesNotMatch(
+      contributing,
+      /\bgit push\b/,
+      "CONTRIBUTING.md must not instruct direct git push releases; releases go through PR merge",
     );
     assert.match(
       contributing,

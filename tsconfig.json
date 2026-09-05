@@ -9,5 +9,19 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["index.ts", "file-read-preview.ts", "focus-preset.ts", "monofold-read-ops.ts", "read-caps.ts", "validation.ts", "tests/**/*.ts"]
+  "include": [
+    "index.ts",
+    "file-read-preview.ts",
+    "focus-decision-note.ts",
+    "focus-preset.ts",
+    "focus-route-override.ts",
+    "focus-session-state.ts",
+    "focus-skills.ts",
+    "monofold-read-ops.ts",
+    "path-normalize.ts",
+    "read-caps.ts",
+    "unknown-path-allows.ts",
+    "validation.ts",
+    "tests/**/*.ts"
+  ]
 }

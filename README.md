@@ -180,6 +180,7 @@ pi-monofold/
 │   ├── release-docs.test.ts
 │   ├── readme-version-pin.test.ts
 │   ├── runtime-path-overlays.test.ts
+│   ├── tsconfig-publishable-files.test.ts
 │   └── unknown-path-allows.test.ts
 ├── CHANGELOG.md
 ├── SECURITY.md

@@ -26,6 +26,12 @@ import {
   warnZeroTargetMatchesForPreset,
 } from "./focus-preset.js";
 import {
+  buildPathLookupWorkspaces,
+  findWorkspaceForAbsolutePath,
+  isPathInsideWorkspace,
+  resolveAbsoluteTargetPath,
+} from "./workspace-path-lookup.js";
+import {
   resolveWriteRouteType,
   type MonofoldRouteType,
 } from "./focus-route-override.js";
@@ -130,6 +136,7 @@ type LoadedConfig = {
   root: string;
   raw: MultiWorkspaceConfig;
   workspaces: ResolvedWorkspace[];
+  pathLookupWorkspaces: ResolvedWorkspace[];
   activeRuntime: RuntimeInfo;
 };
 
@@ -278,10 +285,7 @@ function asPathOverlayMap(label: string, value: unknown): RuntimePathOverlayMap 
 }
 
 function isInside(parent: string, child: string): boolean {
-  const normalizedParent = normalizeGuardPath(parent);
-  const normalizedChild = normalizeGuardPath(child);
-  const relative = path.relative(normalizedParent, normalizedChild);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return isPathInsideWorkspace(parent, child);
 }
 
 function assertWorkspaceInternalRelative(label: string, value: string): void {
@@ -585,6 +589,7 @@ async function validateConfigObject(cwd: string, configPath: string, parsed: unk
       workspaces: workspaces.filter((workspace) => workspace.kind === "workspace"),
     },
     workspaces,
+    pathLookupWorkspaces: buildPathLookupWorkspaces(workspaces),
     activeRuntime,
   };
 }
@@ -1498,8 +1503,8 @@ function classifyPath(targetPath: string): "docs" | "code" | "unknown" {
 }
 
 function findWorkspaceForPath(loaded: LoadedConfig, targetPath: string): ResolvedWorkspace | undefined {
-  const absolute = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
-  return [...loaded.workspaces].sort((a, b) => b.resolvedPath.length - a.resolvedPath.length).find((workspace) => isInside(workspace.resolvedPath, absolute));
+  const absolute = resolveAbsoluteTargetPath(loaded.root, targetPath);
+  return findWorkspaceForAbsolutePath(loaded.pathLookupWorkspaces, absolute);
 }
 
 async function confirm(ctx: ExtensionContext, title: string, body: string): Promise<boolean> {

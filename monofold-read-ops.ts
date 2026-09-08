@@ -51,7 +51,8 @@ export async function shallowTree(
   }
   const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
   const lines: string[] = [];
-  for (const entry of entries.filter((e) => e.name !== ".git" && e.name !== "node_modules")) {
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules") continue;
     if (budget && budget.remaining <= 0) {
       budget.truncated = true;
       break;
@@ -60,7 +61,10 @@ export async function shallowTree(
     lines.push(entry.isDirectory() ? `${rel}/` : rel);
     if (budget) budget.remaining -= 1;
     if (entry.isDirectory() && depth > 0) {
-      lines.push(...(await shallowTree(root, depth - 1, rel, budget)));
+      const childLines = await shallowTree(root, depth - 1, rel, budget);
+      for (const childLine of childLines) {
+        lines.push(childLine);
+      }
     }
   }
   return lines;

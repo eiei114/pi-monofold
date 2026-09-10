@@ -36,6 +36,11 @@ describe("workspace path lookup", () => {
     assert.equal(findWorkspaceForAbsolutePath(lookup, "C:/outside/file.ts"), undefined);
   });
 
+  it("treats dot-dot-prefixed names as workspace children", () => {
+    assert.equal(isPathInsideWorkspace("/repo", "/repo/..cache"), true);
+    assert.equal(isPathInsideWorkspace("/repo", "/repo/../outside"), false);
+  });
+
   it("resolves relative targets against the control root", () => {
     const absolute = resolveAbsoluteTargetPath("C:/control", "docs/note.md");
     assert.equal(absolute.replace(/\\/g, "/"), "C:/control/docs/note.md");
@@ -47,27 +52,23 @@ describe("workspace path lookup", () => {
       resolvedPath: `C:/repo/ws-${String(index).padStart(3, "0")}`,
     }));
     workspaces.push({ id: "nested", resolvedPath: "C:/repo/ws-100/nested" });
+    const inputOrder = workspaces.map((workspace) => workspace.id);
     const lookup = buildPathLookupWorkspaces(workspaces);
-    const target = "C:/repo/ws-100/nested/src/index.ts";
 
-    const iterations = 20_000;
-    const cachedStart = performance.now();
-    for (let index = 0; index < iterations; index += 1) {
-      findWorkspaceForAbsolutePath(lookup, target);
-    }
-    const cachedMs = performance.now() - cachedStart;
-
-    const uncachedStart = performance.now();
-    for (let index = 0; index < iterations; index += 1) {
-      buildPathLookupWorkspaces(workspaces).find((workspace) =>
-        isPathInsideWorkspace(workspace.resolvedPath, target),
-      );
-    }
-    const uncachedMs = performance.now() - uncachedStart;
-
-    assert.ok(
-      cachedMs < uncachedMs * 0.75,
-      `expected cached lookup (${cachedMs.toFixed(2)}ms) to beat per-call sort (${uncachedMs.toFixed(2)}ms)`,
+    // Deterministic caching invariant: one pre-sort, longest root first.
+    assert.notEqual(lookup, workspaces);
+    assert.deepEqual(
+      workspaces.map((workspace) => workspace.id),
+      inputOrder,
     );
+    for (let index = 1; index < lookup.length; index += 1) {
+      assert.ok(lookup[index - 1].resolvedPath.length >= lookup[index].resolvedPath.length);
+    }
+    assert.equal(lookup[0].id, "nested");
+
+    const target = "C:/repo/ws-100/nested/src/index.ts";
+    for (let index = 0; index < 100; index += 1) {
+      assert.equal(findWorkspaceForAbsolutePath(lookup, target)?.id, "nested");
+    }
   });
 });

@@ -18,8 +18,8 @@ function repairMsysPath(value: string): string {
 }
 
 /** Normalizes local paths before workspace guard comparisons. */
-export function normalizeGuardPath(input: string): string {
+export function normalizeGuardPath(input: string, impl: Pick<typeof path, "resolve"> = path): string {
   const trimmed = input.trim();
   if (!trimmed) return trimmed;
-  return path.resolve(repairMsysPath(trimmed));
+  return impl.resolve(repairMsysPath(trimmed));
 }

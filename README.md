@@ -181,7 +181,8 @@ pi-monofold/
 │   ├── readme-version-pin.test.ts
 │   ├── runtime-path-overlays.test.ts
 │   ├── tsconfig-publishable-files.test.ts
-│   └── unknown-path-allows.test.ts
+│   ├── unknown-path-allows.test.ts
+│   └── workspace-path-lookup.test.ts
 ├── CHANGELOG.md
 ├── SECURITY.md
 ├── file-read-preview.ts
@@ -199,6 +200,7 @@ pi-monofold/
 ├── README.md
 ├── unknown-path-allows.ts
 ├── validation.ts
+├── workspace-path-lookup.ts
 └── tsconfig.json
 ```
 

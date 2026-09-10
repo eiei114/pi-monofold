@@ -32,7 +32,8 @@
     "focus-session-state.ts",
     "monofold-read-ops.ts",
     "read-caps.ts",
-    "validation.ts"
+    "validation.ts",
+    "workspace-path-lookup.ts"
   ],
   "name": "pi-monofold",
   "devDependencies": {

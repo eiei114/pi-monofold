@@ -12,34 +12,112 @@ type LookupWorkspace = {
   resolvedPath: string;
 };
 
-describe("workspace path lookup", () => {
-  it("prefers the longest matching workspace root", () => {
-    const workspaces: LookupWorkspace[] = [
+type WorkspaceMatchCase = {
+  label: string;
+  workspaces: LookupWorkspace[];
+  target: string;
+  expectedId: string | undefined;
+};
+
+type PathInsideCase = {
+  label: string;
+  parent: string;
+  child: string;
+  expected: boolean;
+};
+
+const workspaceMatchCases: WorkspaceMatchCase[] = [
+  {
+    label: "prefers the longest matching workspace root",
+    workspaces: [
       { id: "parent", resolvedPath: "C:/repo" },
       { id: "child", resolvedPath: "C:/repo/packages/app" },
-    ];
-    const lookup = buildPathLookupWorkspaces(workspaces);
-    const match = findWorkspaceForAbsolutePath(lookup, "C:/repo/packages/app/src/main.ts");
-    assert.equal(match?.id, "child");
-  });
+    ],
+    target: "C:/repo/packages/app/src/main.ts",
+    expectedId: "child",
+  },
+  {
+    label: "matches nested paths against parent workspaces",
+    workspaces: [{ id: "root", resolvedPath: "C:/repo" }],
+    target: "C:/repo/docs/readme.md",
+    expectedId: "root",
+  },
+  {
+    label: "returns undefined for paths outside configured workspaces",
+    workspaces: [{ id: "root", resolvedPath: "C:/repo" }],
+    target: "C:/outside/file.ts",
+    expectedId: undefined,
+  },
+  {
+    label: "matches posix workspace roots on linux hosts",
+    workspaces: [
+      { id: "parent", resolvedPath: "/repo" },
+      { id: "child", resolvedPath: "/repo/packages/app" },
+    ],
+    target: "/repo/packages/app/src/main.ts",
+    expectedId: "child",
+  },
+  {
+    label: "matches windows-style roots even when host path impl is posix",
+    workspaces: [{ id: "win-root", resolvedPath: "D:/work/monorepo" }],
+    target: "D:/work/monorepo/apps/web/page.tsx",
+    expectedId: "win-root",
+  },
+];
 
-  it("matches nested paths against parent workspaces", () => {
-    const workspaces: LookupWorkspace[] = [{ id: "root", resolvedPath: "C:/repo" }];
-    const lookup = buildPathLookupWorkspaces(workspaces);
-    const match = findWorkspaceForAbsolutePath(lookup, "C:/repo/docs/readme.md");
-    assert.equal(match?.id, "root");
-  });
+const pathInsideCases: PathInsideCase[] = [
+  {
+    label: "treats dot-dot-prefixed cache dirs as workspace children",
+    parent: "/repo",
+    child: "/repo/..cache",
+    expected: true,
+  },
+  {
+    label: "rejects traversal that escapes the workspace root",
+    parent: "/repo",
+    child: "/repo/../outside",
+    expected: false,
+  },
+  {
+    label: "accepts exact workspace root matches",
+    parent: "/repo",
+    child: "/repo",
+    expected: true,
+  },
+  {
+    label: "accepts nested posix children",
+    parent: "/repo",
+    child: "/repo/docs/readme.md",
+    expected: true,
+  },
+  {
+    label: "accepts nested windows children",
+    parent: "C:/repo",
+    child: "C:/repo/packages/app/main.ts",
+    expected: true,
+  },
+  {
+    label: "rejects sibling windows paths",
+    parent: "C:/repo/a",
+    child: "C:/repo/b/file.ts",
+    expected: false,
+  },
+];
 
-  it("returns undefined for paths outside configured workspaces", () => {
-    const workspaces: LookupWorkspace[] = [{ id: "root", resolvedPath: "C:/repo" }];
-    const lookup = buildPathLookupWorkspaces(workspaces);
-    assert.equal(findWorkspaceForAbsolutePath(lookup, "C:/outside/file.ts"), undefined);
-  });
+describe("workspace path lookup", () => {
+  for (const testCase of workspaceMatchCases) {
+    it(testCase.label, () => {
+      const lookup = buildPathLookupWorkspaces(testCase.workspaces);
+      const match = findWorkspaceForAbsolutePath(lookup, testCase.target);
+      assert.equal(match?.id, testCase.expectedId);
+    });
+  }
 
-  it("treats dot-dot-prefixed names as workspace children", () => {
-    assert.equal(isPathInsideWorkspace("/repo", "/repo/..cache"), true);
-    assert.equal(isPathInsideWorkspace("/repo", "/repo/../outside"), false);
-  });
+  for (const testCase of pathInsideCases) {
+    it(testCase.label, () => {
+      assert.equal(isPathInsideWorkspace(testCase.parent, testCase.child), testCase.expected);
+    });
+  }
 
   it("resolves relative targets against the control root", () => {
     const absolute = resolveAbsoluteTargetPath("C:/control", "docs/note.md");

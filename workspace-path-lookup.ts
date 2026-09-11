@@ -39,6 +39,7 @@ export function findWorkspaceForAbsolutePath<T extends { resolvedPath: string }>
   pathLookupWorkspaces: readonly T[],
   absolutePath: string,
 ): T | undefined {
-  const absolute = normalizeGuardPath(absolutePath);
+  const impl = selectPathImpl(absolutePath, ...pathLookupWorkspaces.map((workspace) => workspace.resolvedPath));
+  const absolute = normalizeGuardPath(absolutePath, impl);
   return pathLookupWorkspaces.find((workspace) => isPathInsideWorkspace(workspace.resolvedPath, absolute));
 }

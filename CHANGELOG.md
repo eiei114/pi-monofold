@@ -1,5 +1,11 @@
 ## Unreleased
 
+## [0.12.5] - 2026-09-12
+
+### Fixed
+
+- Normalize workspace lookup paths with the correct win32/posix path impl on Linux CI, fixing npm publish validation failures.
+
 ## [0.12.4] - 2026-08-22
 
 ### Changed

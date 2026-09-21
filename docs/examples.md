@@ -1,6 +1,42 @@
 # Examples
 
-Natural-language arguments are interpreted by the Pi agent. These samples show typical requests.
+Natural-language arguments are interpreted by the Pi agent. The quick start below is a copy-and-run baseline; the remaining samples show typical requests.
+
+## Copy-and-run quick start
+
+Run these commands from a control repository. The workspace path `.` keeps the example self-contained, so no sibling repositories or machine-specific paths are required.
+
+1. Create `.pi/monofold.yaml`:
+
+```yaml
+version: 1
+
+workspaces:
+  - name: Control repository
+    path: .
+    tags: [control, markdown]
+    capabilities: [read, writeDocs, git]
+    routes:
+      default: Notes
+```
+
+2. Start Pi in that repository and confirm the manifest:
+
+```text
+/monofold:explore show the configured workspaces
+```
+
+Expected result: the `Control repository` workspace is listed with `read`, `writeDocs`, and `git` capabilities.
+
+3. Create a routed Markdown note:
+
+```text
+/monofold:write write a short onboarding note for the project
+```
+
+Expected result: a Markdown file is created below `Notes/` using the default route. Use `/monofold:explore show the project workspaces` to inspect it.
+
+The config wizard can create or update the same file interactively with `/monofold:init`; use `/monofold:guide` when you want guided Explore, Write, Config, or Git flows.
 
 ## Explore
 

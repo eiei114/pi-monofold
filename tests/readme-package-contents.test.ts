@@ -3,9 +3,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 function extractPackageContentsTree(readme: string): string {
-  const match = readme.match(/## Package contents\s+```text\n([\s\S]*?)```/);
+  const match = readme.match(/## Package contents\s+```text\r?\n([\s\S]*?)```/);
   assert.ok(match, "README must include a Package contents tree");
-  return match[1];
+  return match[1].replaceAll("\r\n", "\n");
 }
 
 describe("README package contents tree", () => {

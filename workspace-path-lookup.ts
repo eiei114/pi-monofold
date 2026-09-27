@@ -41,5 +41,11 @@ export function findWorkspaceForAbsolutePath<T extends { resolvedPath: string }>
 ): T | undefined {
   const impl = selectPathImpl(absolutePath, ...pathLookupWorkspaces.map((workspace) => workspace.resolvedPath));
   const absolute = normalizeGuardPath(absolutePath, impl);
-  return pathLookupWorkspaces.find((workspace) => isPathInsideWorkspace(workspace.resolvedPath, absolute));
+  return pathLookupWorkspaces.find((workspace) => {
+    const relative = impl.relative(normalizeGuardPath(workspace.resolvedPath, impl), absolute);
+    return (
+      relative === "" ||
+      (relative !== ".." && !relative.startsWith(`..${impl.sep}`) && !impl.isAbsolute(relative))
+    );
+  });
 }

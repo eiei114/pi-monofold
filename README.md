@@ -52,7 +52,7 @@ pi install -l git:github.com/eiei114/pi-monofold
 Pin a version:
 
 ```powershell
-pi install git:github.com/eiei114/pi-monofold@v0.12.5
+pi install git:github.com/eiei114/pi-monofold@v0.12.10
 ```
 
 Try without installing:

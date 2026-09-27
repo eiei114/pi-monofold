@@ -1,43 +1,31 @@
+
+
+## Unreleased
+
 ## [0.12.10] - 2026-09-27
 
 - chore: periodic patch bump after 7+ days without npm publish
 
-## 0.12.9 - 2026-09-27
 
-- chore: periodic patch bump after 7+ days without npm publish
 
-## 0.12.8 - 2026-09-27
 
-- chore: periodic patch bump after 7+ days without npm publish
-
-## 0.12.7 - 2026-09-27
-
-- chore: periodic patch bump after 7+ days without npm publish
-
-## 0.12.6 - 2026-09-27
-
-- chore: periodic patch bump after 7+ days without npm publish
 
 ## Unreleased
-
 ## [0.12.5] - 2026-09-12
 
 ### Fixed
 
 - Normalize workspace lookup paths with the correct win32/posix path impl on Linux CI, fixing npm publish validation failures.
-
 ## [0.12.4] - 2026-08-22
 
 ### Changed
 
 - Merge the 2026-08-22 managed OSS dependency and maintenance PR batch.
-
 ## [0.12.3] - 2026-08-04
 
 ### Changed
 
 - Bump package version for the Discord release webhook verification.
-
 ## [0.12.2] - 2026-07-20
 
 ### Changed
@@ -48,7 +36,6 @@
 ### Added
 
 - Regression tests for README package contents tree and GitHub Actions workflow pins.
-
 ## [0.12.1] - 2026-07-13
 
 ### Added
@@ -58,7 +45,6 @@
 ### Changed
 
 - Confirmed provisional injection caps unchanged (6 files / 6,000 chars per file / 12,000 total per turn); constants remain exported from `index.ts` for future tuning.
-
 ## [0.12.0] - 2026-07-05
 
 ### Added
@@ -81,13 +67,11 @@
 
 - `monofold_list` Active Focus health now lists declared `focusSkills` for the active preset.
 - Documented dogfood recommendations for when to enable `focusSkills`, including the all-declared-names-missing case (`docs/usage.md`, `docs/focus-skills-dogfood.md`).
-
 ## [0.11.1] - 2026-07-04
 
 ### Added
 
 - Add Buy Me a Coffee sponsor button to README and native GitHub funding link via `.github/FUNDING.yml`.
-
 ## [0.10.0] - 2026-07-02
 
 ### Added
@@ -98,21 +82,12 @@
 - Documented when to use `decisionNoteDestination` versus ordinary `monofold_write` decision routes.
 
 # Changelog
-
-## [Unreleased]
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [0.9.0] - 2026-06-30
 
 ### Added
 
 - Added `shift+ctrl+f` backward focus-cycle shortcut and `/monofold:focus-prev` command to move Active Focus to the previous preset in YAML order.
 - Footer focus status now shows both forward and backward shortcuts.
-
 ## [0.8.0] - 2026-06-29
 
 ### Added
@@ -122,7 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Active Focus status and manifest output show the resolved route override when present.
 - Explicit `routeType` / `--route` still override Focus-derived defaults.
 - Documented configuration examples and precedence rules for `defaultRouteOverride`.
-
 ## [0.7.0] - 2026-06-28
 
 ### Added
@@ -130,26 +104,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `focusSkills` on Focus presets auto-loads a bounded set of declared Pi skills when that preset is active.
 - Missing or unknown `focusSkills` names emit actionable runtime warnings instead of failing silently.
 - Documented when to use `focusSkills` versus Pi Skill Shiori or ordinary triggerable skill discovery.
-
 ## [0.6.2] - 2026-06-21
 
 ### Added
 
 - Bias tag-based Unique Target Inference toward Active Focus workspaces in `monofold_read`, `monofold_write`, and `monofold_git` when a tag query matches multiple candidates.
-
 ## [0.6.1] - 2026-06-19
 
 ### Changed
 
 - Document Focus Preset as the Monofold-owned workspace-context switch pattern in the shared Pi extension OSS rules (vault reference; no package behavior change).
-
 ## [0.6.0] - 2026-06-16
 
 ### Added
 
 - Inject Active Focus context files into agent turns with provisional file-count, per-file, and total-character caps.
 - Recompose focused manifests so active Workspace Targets appear first and non-active targets are collapsed.
-
 ## [0.5.0] - 2026-06-09
 
 ### Changed
@@ -157,26 +127,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Marked the safe-read behavior changes as a minor release boundary: `monofold_read` file reads now default to metadata plus a bounded preview instead of full file content.
 - Documented capped search/tree output with truncation markers so exploratory reads stay safe for chat history.
 - Noted legacy slash-command parity for the same safe file preview and capped search/tree behavior.
-
 ## [0.4.0] - 2026-06-08
 
 ### Added
 
 - Added `/monofold:focus`, the `ctrl+shift+m` forward focus-cycle shortcut, and a footer status indicator for the active focus preset.
-
 ## [0.3.3] - 2026-06-06
 
 ### Removed
 
 - Legacy underscored slash commands (`monofold_list`, `monofold_read`, `monofold_tree`, `monofold_search`, `monofold_add`, `monofold_project_add`, `monofold_clear_unknown_path_allows`). Use the colon-separated equivalents (`monofold:list`, `monofold:read`, etc.) instead.
-
 ## [0.3.2] - 2026-06-04
 
 ### Fixed
 
 - Normalize MSYS/Git Bash mixed Windows paths such as `C:/c/Users/...` and `/c/Users/...` before workspace guard checks, preventing false Unknown Path confirmations for registered Development Workspaces.
 - Document canonical Windows `cd` usage in `docs/usage.md`.
-
 ## [0.3.1] - 2026-06-03
 
 ### Changed
@@ -189,8 +155,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI workflow (`ci.yml`) for package validation on push and PR.
 - `CHANGELOG.md` and `SECURITY.md`.
-
 ## [0.3.0] - prior release
 
 See git history and GitHub releases for earlier changes.
-

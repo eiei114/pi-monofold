@@ -76,7 +76,7 @@ pi install -l npm:pi-monofold
 Pin a version:
 
 ```powershell
-pi install npm:pi-monofold@0.12.5
+pi install npm:pi-monofold@0.12.10
 ```
 
 Try without installing:

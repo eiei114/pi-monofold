@@ -34,7 +34,7 @@ Expected result: the `Control repository` workspace is listed with `read`, `writ
 /monofold:write write a short onboarding note for the project
 ```
 
-Expected result: a Markdown file is created below `Notes/` using the default route. Use `/monofold:explore show the project workspaces` to inspect it.
+Expected result: Pi identifies the `Control repository` target and asks you to confirm the route and filename. After confirmation, a Markdown file is created below `Notes/` using the default route. Use `/monofold:explore show the project workspaces` to inspect it.
 
 The config wizard can create or update the same file interactively with `/monofold:init`; use `/monofold:guide` when you want guided Explore, Write, Config, or Git flows.
 

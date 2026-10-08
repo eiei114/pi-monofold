@@ -13,15 +13,21 @@ function selectPathImpl(...values: string[]): PathImpl {
   return values.some(isWindowsStylePath) ? path.win32 : path;
 }
 
-/** Returns true when `child` is inside or equal to `parent`. */
-export function isPathInsideWorkspace(parent: string, child: string): boolean {
-  const impl = selectPathImpl(parent, child);
-  const normalizedParent = normalizeGuardPath(parent, impl);
-  const normalizedChild = normalizeGuardPath(child, impl);
-  const relative = impl.relative(normalizedParent, normalizedChild);
+function isRelativePathInside(impl: PathImpl, parent: string, child: string): boolean {
+  const relative = impl.relative(parent, child);
   return (
     relative === "" ||
     (relative !== ".." && !relative.startsWith(`..${impl.sep}`) && !impl.isAbsolute(relative))
+  );
+}
+
+/** Returns true when `child` is inside or equal to `parent`. */
+export function isPathInsideWorkspace(parent: string, child: string): boolean {
+  const impl = selectPathImpl(parent, child);
+  return isRelativePathInside(
+    impl,
+    normalizeGuardPath(parent, impl),
+    normalizeGuardPath(child, impl),
   );
 }
 
@@ -41,11 +47,7 @@ export function findWorkspaceForAbsolutePath<T extends { resolvedPath: string }>
 ): T | undefined {
   const impl = selectPathImpl(absolutePath, ...pathLookupWorkspaces.map((workspace) => workspace.resolvedPath));
   const absolute = normalizeGuardPath(absolutePath, impl);
-  return pathLookupWorkspaces.find((workspace) => {
-    const relative = impl.relative(normalizeGuardPath(workspace.resolvedPath, impl), absolute);
-    return (
-      relative === "" ||
-      (relative !== ".." && !relative.startsWith(`..${impl.sep}`) && !impl.isAbsolute(relative))
-    );
-  });
+  return pathLookupWorkspaces.find((workspace) =>
+    isRelativePathInside(impl, normalizeGuardPath(workspace.resolvedPath, impl), absolute),
+  );
 }

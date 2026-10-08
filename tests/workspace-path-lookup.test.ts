@@ -49,6 +49,12 @@ const workspaceMatchCases: WorkspaceMatchCase[] = [
     expectedId: undefined,
   },
   {
+    label: "does not treat a sibling with a shared prefix as a workspace child",
+    workspaces: [{ id: "root", resolvedPath: "C:/repo" }],
+    target: "C:/repository/file.ts",
+    expectedId: undefined,
+  },
+  {
     label: "matches posix workspace roots on linux hosts",
     workspaces: [
       { id: "parent", resolvedPath: "/repo" },

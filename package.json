@@ -2,7 +2,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "check": "npm run typecheck && npm test && npm pack --dry-run",
+    "smoke:pi": "node scripts/pi-sdk-smoke.mjs",
+    "check": "npm run typecheck && npm test && npm run smoke:pi && npm pack --dry-run",
     "version:check": "node scripts/check-version-bump.mjs"
   },
   "peerDependencies": {
@@ -12,7 +13,7 @@
   },
   "description": "Pi extension that folds multiple repositories and folders into a guarded virtual monorepo for AI agents.",
   "type": "module",
-  "version": "0.12.11",
+  "version": "0.12.12",
   "pi": {
     "extensions": [
       "./index.ts"
@@ -41,8 +42,10 @@
     "typebox": "^1.1.38",
     "@types/node": "^26.0.0",
     "tsx": "^4.20.5",
-    "@earendil-works/pi-coding-agent": "^0.99.1",
-    "@earendil-works/pi-ai": "^1.0.2"
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0"
   },
   "dependencies": {
     "yaml": "^2.8.1"

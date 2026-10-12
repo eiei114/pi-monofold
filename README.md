@@ -52,7 +52,7 @@ pi install -l git:github.com/eiei114/pi-monofold
 Pin a version:
 
 ```powershell
-pi install git:github.com/eiei114/pi-monofold@v0.12.11
+pi install git:github.com/eiei114/pi-monofold@v0.12.12
 ```
 
 Try without installing:
@@ -76,7 +76,7 @@ pi install -l npm:pi-monofold
 Pin a version:
 
 ```powershell
-pi install npm:pi-monofold@0.12.11
+pi install npm:pi-monofold@0.12.12
 ```
 
 Try without installing:
@@ -147,7 +147,7 @@ Agents should call **`monofold_read`** (not guess at raw Pi `read`). Humans shou
 ```text
 pi-monofold/
 ├── .github/workflows/
-│   ├── auto-release.yml            # Auto-tag + release on merge to main
+│   ├── auto-release.yml            # Manually authorized tag + release
 │   ├── ci.yml                      # Validate on PR / push
 │   └── publish.yml                 # Publish to npm (Trusted Publishing)
 ├── docs/
@@ -155,7 +155,10 @@ pi-monofold/
 │   ├── examples.md                 # Command examples
 │   └── release.md                  # Release and publish flow
 ├── scripts/
-│   └── check-version-bump.mjs      # PR version bump guard (CI)
+│   ├── check-version-bump.mjs      # PR version bump guard (CI)
+│   ├── pi-sdk-smoke.mjs            # Actual pinned Pi RPC lifecycle smoke
+│   ├── pi-sdk-smoke-contract.mjs   # Behavior-v2 smoke assertions
+│   └── release-trigger-contract.mjs # Release/publish trigger guard
 ├── tests/
 │   ├── file-read-preview.test.ts
 │   ├── focus-command.test.ts
@@ -176,8 +179,10 @@ pi-monofold/
 │   ├── monofold-read-caps.test.ts
 │   ├── monofold-read-ops.test.ts
 │   ├── path-normalize.test.ts
+│   ├── pi-sdk-smoke-contract.test.ts
 │   ├── readme-package-contents.test.ts
 │   ├── release-docs.test.ts
+│   ├── release-trigger-contract.test.ts
 │   ├── readme-version-pin.test.ts
 │   ├── runtime-path-overlays.test.ts
 │   ├── tsconfig-publishable-files.test.ts
@@ -223,12 +228,12 @@ pi -e .
 
 ## Release
 
-Releases are automated. See [docs/release.md](./docs/release.md) for details.
+Releases require an explicit workflow dispatch from `main`; merging a maintenance PR runs CI only. See [docs/release.md](./docs/release.md) for details.
 
 1. Bump `version` in `package.json` and update `CHANGELOG.md`.
-2. Merge to `main`.
-3. **Auto Release** tags `v<version>` and creates a GitHub release when the tag is new.
-4. The tag triggers **Publish**, which publishes to npm with OIDC provenance.
+2. Merge the PR to `main`; this does not create a tag, release, or publish.
+3. After separate release authorization, dispatch **Release (manual)** from `main`.
+4. The workflow creates the version tag and GitHub release; **Publish** then publishes to npm with OIDC provenance.
 
 ## Security
 

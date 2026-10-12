@@ -27,11 +27,12 @@ Before opening a PR:
 
 ## Release
 
-Releases publish **`pi-monofold`** to npm through Trusted Publishing after merge to `main`. Do not add `NPM_TOKEN` to GitHub Secrets.
+Releases publish **`pi-monofold`** to npm through Trusted Publishing after a separately authorized workflow dispatch from `main`. Merging a maintenance PR does not release or publish. Do not add `NPM_TOKEN` to GitHub Secrets.
 
 1. Update `CHANGELOG.md` with the new version and date.
 2. Bump `version` in `package.json`.
 3. Open a PR and ensure CI passes (including `npm run version:check` when you bump the version).
-4. Merge to `main`. **Auto Release** tags `v<version>` and **Publish** publishes to npm with OIDC provenance.
+4. Merge the PR to `main`; this does not create a tag or publish.
+5. After separate release authorization, dispatch **Release (manual)** from `main`. It tags the selected version and publishes through OIDC provenance.
 
 See [docs/release.md](./docs/release.md) for the full release flow and Trusted Publisher settings.

@@ -33,4 +33,9 @@ describe("release docs match CI", () => {
       "docs/release.md must document npm run check as the primary validation command",
     );
   });
+
+  it("documents actual offline Pi SDK smoke in the CI-equivalent check", () => {
+    assert.match(release, /npm run check[\s\S]*?actual pinned Pi SDK RPC smoke/);
+    assert.match(release, /isolated Pi processes[\s\S]*?does not read global Pi settings or make model requests/);
+  });
 });

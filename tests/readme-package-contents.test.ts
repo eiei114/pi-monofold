@@ -31,7 +31,7 @@ describe("README package contents tree", () => {
   it("documents the CI version bump guard script", () => {
     assert.match(
       tree,
-      /├── scripts\/\n│   └── check-version-bump\.mjs\b/,
+      /├── scripts\/\n│   ├── check-version-bump\.mjs\b/,
     );
   });
 

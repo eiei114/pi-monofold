@@ -12,6 +12,7 @@ import {
   REQUIRED_SDK_VERSIONS,
   VERIFICATION_CONTRACT,
 } from "./pi-sdk-smoke-contract.mjs";
+import { killAndWaitForClose, waitFor, wakeWaiters } from "./pi-sdk-smoke-process.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const reportPath = process.argv.includes("--update-curated-report")
@@ -76,42 +77,6 @@ const hostArgs = [
   "--mode", "rpc",
 ];
 const DEADLINE_MS = 15_000;
-
-function wakeWaiters(state) {
-  for (const check of [...state.waiters]) check();
-}
-
-function waitFor(state, predicate, deadline) {
-  const existing = predicate();
-  if (existing) return Promise.resolve(existing);
-  const remaining = deadline - Date.now();
-  if (remaining <= 0) {
-    const error = new Error("Pi RPC probe deadline exceeded");
-    error.code = "PROBE_DEADLINE";
-    return Promise.reject(error);
-  }
-  return new Promise((resolvePromise, rejectPromise) => {
-    const finish = (callback, value) => {
-      clearTimeout(timer);
-      state.waiters.delete(check);
-      callback(value);
-    };
-    const check = () => {
-      const result = predicate();
-      if (result) finish(resolvePromise, result);
-      else if (state.closed) finish(rejectPromise, new Error("Pi process exited before the expected RPC observation"));
-      else if (state.spawnError) finish(rejectPromise, state.spawnError);
-      else if (state.stdinError) finish(rejectPromise, state.stdinError);
-    };
-    const timer = setTimeout(() => {
-      const error = new Error("Pi RPC probe deadline exceeded");
-      error.code = "PROBE_DEADLINE";
-      finish(rejectPromise, error);
-    }, remaining);
-    state.waiters.add(check);
-    check();
-  });
-}
 
 function runRpc(commands) {
   const child = spawn(process.execPath, hostArgs, {
@@ -188,7 +153,7 @@ function runRpc(commands) {
           await waitFor(state, () => state.closed, cleanupDeadline);
         } catch {
           // The probe remains failed; request hard termination of this owned child.
-          child.kill("SIGKILL");
+          await killAndWaitForClose(state);
         }
       }
     }

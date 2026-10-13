@@ -1,7 +1,7 @@
 {
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/**/*.test.ts tests/release-trigger-contract.test.mjs",
+    "test": "node --import tsx --test tests/**/*.test.ts tests/release-trigger-contract.test.mjs tests/pi-sdk-smoke-process.test.mjs",
     "smoke:pi": "node scripts/pi-sdk-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run smoke:pi && npm pack --dry-run",
     "version:check": "node scripts/check-version-bump.mjs"

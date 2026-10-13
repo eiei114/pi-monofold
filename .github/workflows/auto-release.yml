@@ -18,49 +18,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for unreleased version
-        id: check
+      - name: Complete release and publish stages
         shell: bash
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          TAG="v${CURRENT_VERSION}"
-
-          if ! printf '%s' "$CURRENT_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-            echo "Repository version is not a stable semver; refusing release." >&2
-            exit 1
-          fi
-
-          if git tag -l "$TAG" | grep -qx "$TAG"; then
-            echo "Tag $TAG already exists; skipping."
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Explicit manual release requested for ${CURRENT_VERSION}."
-          echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Create tag and release
-        if: steps.check.outputs.released == 'true'
-        shell: bash
-        run: |
-          TAG="${{ steps.check.outputs.tag }}"
-          PREV_TAG=$(git tag --sort=-version:refname | head -1)
-          NOTES="Released ${TAG}."
-          if [ -n "$PREV_TAG" ]; then
-            NOTES="${NOTES}\n\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
-          fi
-          git tag "$TAG"
-          git push origin "$TAG"
-          gh release create "$TAG" --title "$TAG" --notes "$NOTES"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger publish workflow
-        if: steps.check.outputs.released == 'true'
-        shell: bash
-        run: |
-          TAG="${{ steps.check.outputs.tag }}"
-          gh workflow run publish.yml --ref "$TAG" -f ref="$TAG"
+        run: node scripts/auto-release.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

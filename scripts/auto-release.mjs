@@ -33,6 +33,24 @@ export function isStableSemver(version) {
   return STABLE_SEMVER.test(version);
 }
 
+/**
+ * Refuse to push, release or dispatch when the existing local/remote tag does
+ * not point at the commit being released. A stale tag would otherwise publish a
+ * different commit than the one under review.
+ */
+export function assertTagMatchesHead(execute, tag, headSha) {
+  if (!headSha) throw new Error("HEAD commit is required to verify the release tag");
+  const resolved = execute("git", ["rev-parse", "--verify", `${tag}^{commit}`], { allowFailure: true });
+  if (resolved.status !== 0 || !resolved.stdout.trim()) {
+    throw new Error(`Unable to resolve commit for existing tag ${tag}`);
+  }
+  const tagSha = resolved.stdout.trim();
+  if (tagSha !== headSha) {
+    throw new Error(`Tag ${tag} points at ${tagSha} but HEAD is ${headSha}; refusing to release a different commit`);
+  }
+  return tagSha;
+}
+
 export function shouldDispatchPublish(runs, tagSha, tag) {
   if (!Array.isArray(runs)) throw new Error("Publish workflow runs must be an array");
   return !runs.some((workflowRun) => workflowRun.event === "workflow_dispatch"
@@ -50,14 +68,18 @@ export function completeRelease({ version, repository, execute = run, log = () =
   if (!repository) throw new Error("GITHUB_REPOSITORY is required to complete a release");
 
   const tag = `v${version}`;
+  const headSha = runRequired(execute, "git", ["rev-parse", "HEAD"]).stdout.trim();
   const remoteTag = execute("git", ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`], { allowFailure: true });
   if (remoteTag.status === 2) {
     const localTag = runRequired(execute, "git", ["tag", "--list", tag]).stdout.trim();
-    if (!localTag) runRequired(execute, "git", ["tag", tag]);
+    if (localTag) assertTagMatchesHead(execute, tag, headSha);
+    else runRequired(execute, "git", ["tag", tag]);
     runRequired(execute, "git", ["push", "origin", tag]);
     log(`Pushed missing tag ${tag}.`);
   } else if (remoteTag.status === 0) {
-    log(`Tag ${tag} already exists; checking remaining release stages.`);
+    runRequired(execute, "git", ["fetch", "--force", "--tags", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
+    assertTagMatchesHead(execute, tag, headSha);
+    log(`Tag ${tag} already exists at HEAD; checking remaining release stages.`);
   } else {
     throw new Error(`Unable to check remote tag ${tag}: ${remoteTag.stderr.trim()}`);
   }

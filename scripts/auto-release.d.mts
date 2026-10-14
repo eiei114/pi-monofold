@@ -10,3 +10,9 @@ export function completeRelease(options: {
   };
   log?: (message: string) => void;
 }): void;
+
+export declare function assertTagMatchesHead(
+  execute: (command: string, args: string[], options?: { allowFailure?: boolean }) => { status: number; stdout: string; stderr: string },
+  tag: string,
+  headSha: string,
+): string;

@@ -2,10 +2,10 @@
   "schema_version": 1,
   "verification_contract": "pi-sdk-behavior-v2",
   "sdk_versions": {
-    "@earendil-works/pi-agent-core": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-coding-agent": "1.1.0",
-    "@earendil-works/pi-tui": "1.1.0"
+    "@earendil-works/pi-agent-core": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-tui": "1.2.0"
   },
   "platform": "win32",
   "model_inference": "none; real Pi RPC extension commands only, with isolated offline settings",
@@ -89,12 +89,12 @@
       "command": "npm run smoke:pi",
       "exit_code": 0,
       "passed": true,
-      "evidence": "{\"artifact\":\"docs/verification/pi-sdk-smoke.json#cases.host_shell.evidence\",\"paths_normalized\":true,\"exit_code\":0,\"exited\":true,\"signal\":null,\"timed_out\":false,\"spawn_error\":null,\"stdout\":\"1.1.0\\n\",\"stderr\":\"\"}",
+      "evidence": "{\"artifact\":\"docs/verification/pi-sdk-smoke.json#cases.host_shell.evidence\",\"paths_normalized\":true,\"exit_code\":0,\"exited\":true,\"signal\":null,\"timed_out\":false,\"spawn_error\":null,\"stdout\":\"1.2.0\\n\",\"stderr\":\"\"}",
       "assertions": [
         {
           "id": "native_shell_boundary",
-          "expected": "The native host shell launches the locally pinned Pi CLI and prints exactly its 1.1.0 version",
-          "observed": "{\"exit_code\":0,\"exited\":true,\"output\":\"1.1.0\",\"expectedVersion\":\"1.1.0\"}",
+          "expected": "The native host shell launches the locally pinned Pi CLI and prints exactly its 1.2.0 version",
+          "observed": "{\"exit_code\":0,\"exited\":true,\"output\":\"1.2.0\",\"expectedVersion\":\"1.2.0\"}",
           "passed": true
         }
       ]

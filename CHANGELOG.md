@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [0.12.13] - 2026-10-16
+
+### Changed
+
+- Verify Pi SDK 1.2.0 compatibility and pin the SDK used by development and tests.
+
 ## [0.12.12] - 2026-10-12
 
 ### Changed

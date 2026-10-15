@@ -64,10 +64,10 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   it("declares the frozen SDK and behavior contract", () => {
     assert.equal(VERIFICATION_CONTRACT, "pi-sdk-behavior-v2");
     assert.deepEqual(REQUIRED_SDK_VERSIONS, {
-      "@earendil-works/pi-agent-core": "1.1.0",
-      "@earendil-works/pi-ai": "1.1.0",
-      "@earendil-works/pi-coding-agent": "1.1.0",
-      "@earendil-works/pi-tui": "1.1.0",
+      "@earendil-works/pi-agent-core": "1.2.0",
+      "@earendil-works/pi-ai": "1.2.0",
+      "@earendil-works/pi-coding-agent": "1.2.0",
+      "@earendil-works/pi-tui": "1.2.0",
     });
   });
 
@@ -111,11 +111,11 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   });
 
   it("requires the native shell to return the exact SDK version, not a substring", () => {
-    assert.equal(nativeShellBoundary(0, true, "1.1.0\r\n", "1.1.0").passed, true);
-    for (const output of ["", "11.1.0", "1.1.0 with warning", "1.0.0"]) {
-      assert.equal(nativeShellBoundary(0, true, output, "1.1.0").passed, false);
+    assert.equal(nativeShellBoundary(0, true, "1.2.0\r\n", "1.2.0").passed, true);
+    for (const output of ["", "11.2.0", "1.2.0 with warning", "1.1.0"]) {
+      assert.equal(nativeShellBoundary(0, true, output, "1.2.0").passed, false);
     }
-    assert.equal(nativeShellBoundary(null, false, "1.1.0", "1.1.0").passed, false);
+    assert.equal(nativeShellBoundary(null, false, "1.2.0", "1.2.0").passed, false);
   });
 
   it("parses only JSON object records and reports malformed RPC output", () => {

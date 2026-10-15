@@ -153,4 +153,23 @@ describe("cross-session focus restore", () => {
     assert.equal(getActiveFocusInitSource(), "malformed");
     assert.ok(notifications.some((message) => message.includes("malformed focus session state")));
   });
+
+  it("warns and uses the default when saved state omits the active focus id", async () => {
+    const root = await makeWorkspaceRoot();
+    await writeFile(resolveFocusSessionStatePath(root), JSON.stringify({ version: 1 }), "utf8");
+
+    const notifications: string[] = [];
+    await loadSessionStart()({}, {
+      cwd: root,
+      hasUI: true,
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => {},
+      },
+    });
+
+    assert.equal(getActiveFocusPresetId(), "control");
+    assert.equal(getActiveFocusInitSource(), "malformed");
+    assert.ok(notifications.some((message) => message.includes("malformed focus session state")));
+  });
 });

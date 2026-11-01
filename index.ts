@@ -27,9 +27,8 @@ import {
 } from "./focus-preset.js";
 import {
   buildPathLookupWorkspaces,
-  findWorkspaceForAbsolutePath,
   isPathInsideWorkspace,
-  resolveAbsoluteTargetPath,
+  resolveWorkspaceTargetPath,
 } from "./workspace-path-lookup.js";
 import {
   resolveWriteRouteType,
@@ -1503,8 +1502,7 @@ function classifyPath(targetPath: string): "docs" | "code" | "unknown" {
 }
 
 function findWorkspaceForPath(loaded: LoadedConfig, targetPath: string): ResolvedWorkspace | undefined {
-  const absolute = resolveAbsoluteTargetPath(loaded.root, targetPath);
-  return findWorkspaceForAbsolutePath(loaded.pathLookupWorkspaces, absolute);
+  return resolveWorkspaceTargetPath(loaded.pathLookupWorkspaces, loaded.root, targetPath).workspace;
 }
 
 async function confirm(ctx: ExtensionContext, title: string, body: string): Promise<boolean> {
@@ -1513,9 +1511,12 @@ async function confirm(ctx: ExtensionContext, title: string, body: string): Prom
 }
 
 async function maybeBlockUnknown(ctx: ExtensionContext, loaded: LoadedConfig, targetPath: string, action: string) {
-  const workspace = findWorkspaceForPath(loaded, targetPath);
+  const { absolutePath: normalized, workspace } = resolveWorkspaceTargetPath(
+    loaded.pathLookupWorkspaces,
+    loaded.root,
+    targetPath,
+  );
   if (workspace) return undefined;
-  const normalized = normalizeGuardPath(path.isAbsolute(targetPath) ? targetPath : path.resolve(loaded.root, targetPath));
   const storedAllows = await loadUnknownPathAllows(loaded.root);
   if (storedAllows.has(normalized)) return undefined;
   if (!ctx.hasUI) return { block: true, reason: `Unknown Path requires confirmation: ${targetPath}` };

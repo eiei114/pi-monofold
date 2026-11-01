@@ -51,3 +51,16 @@ export function findWorkspaceForAbsolutePath<T extends { resolvedPath: string }>
     isRelativePathInside(impl, normalizeGuardPath(workspace.resolvedPath, impl), absolute),
   );
 }
+
+/** Resolves a target once and returns both its canonical path and matching workspace. */
+export function resolveWorkspaceTargetPath<T extends { resolvedPath: string }>(
+  pathLookupWorkspaces: readonly T[],
+  root: string,
+  targetPath: string,
+): { absolutePath: string; workspace: T | undefined } {
+  const absolutePath = resolveAbsoluteTargetPath(root, targetPath);
+  return {
+    absolutePath,
+    workspace: findWorkspaceForAbsolutePath(pathLookupWorkspaces, absolutePath),
+  };
+}

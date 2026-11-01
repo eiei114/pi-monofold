@@ -5,6 +5,7 @@ import {
   findWorkspaceForAbsolutePath,
   isPathInsideWorkspace,
   resolveAbsoluteTargetPath,
+  resolveWorkspaceTargetPath,
 } from "../workspace-path-lookup.js";
 
 type LookupWorkspace = {
@@ -128,6 +129,16 @@ describe("workspace path lookup", () => {
   it("resolves relative targets against the control root", () => {
     const absolute = resolveAbsoluteTargetPath("C:/control", "docs/note.md");
     assert.equal(absolute.replace(/\\/g, "/"), "C:/control/docs/note.md");
+  });
+
+  it("shares the canonical Windows target path with workspace matching on POSIX hosts", () => {
+    const resolved = resolveWorkspaceTargetPath(
+      buildPathLookupWorkspaces([{ id: "control", resolvedPath: "/control" }]),
+      "/control",
+      "C:/outside/file.md",
+    );
+    assert.equal(resolved.absolutePath.replace(/\\/g, "/"), "C:/outside/file.md");
+    assert.equal(resolved.workspace, undefined);
   });
 
   it("reuses pre-sorted lookup order across repeated guard checks", () => {

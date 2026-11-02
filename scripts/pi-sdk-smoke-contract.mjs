@@ -1,10 +1,10 @@
 export const VERIFICATION_CONTRACT = "pi-sdk-behavior-v2";
-export const REQUIRED_SDK_VERSIONS = Object.freeze({
-  "@earendil-works/pi-agent-core": "1.2.0",
-  "@earendil-works/pi-ai": "1.2.0",
-  "@earendil-works/pi-coding-agent": "1.2.0",
-  "@earendil-works/pi-tui": "1.2.0",
-});
+export const REQUIRED_SDK_PACKAGES = Object.freeze([
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
+]);
 
 export function parseJsonLines(output) {
   const records = [];
@@ -93,7 +93,7 @@ export function cleanShutdown(exitCode, exited, signal, hasRuntimeErrors) {
 export function nativeShellBoundary(exitCode, exited, output, expectedVersion) {
   return assertion(
     "native_shell_boundary",
-    "The native host shell launches the locally pinned Pi CLI and prints exactly its 1.2.0 version",
+    "The native host shell launches the locally pinned Pi CLI and prints exactly its manifest-pinned version",
     { exit_code: exitCode, exited, output: output.trim(), expectedVersion },
     exited === true && exitCode === 0 && output.trim() === expectedVersion,
   );

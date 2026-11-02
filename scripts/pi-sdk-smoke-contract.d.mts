@@ -1,5 +1,5 @@
 export const VERIFICATION_CONTRACT: "pi-sdk-behavior-v2";
-export const REQUIRED_SDK_VERSIONS: Readonly<Record<string, string>>;
+export const REQUIRED_SDK_PACKAGES: readonly string[];
 
 export function parseJsonLines(output: string): {
   records: Record<string, any>[];

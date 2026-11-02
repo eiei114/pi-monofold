@@ -9,7 +9,7 @@ import {
   handledError,
   nativeShellBoundary,
   parseJsonLines,
-  REQUIRED_SDK_VERSIONS,
+  REQUIRED_SDK_PACKAGES,
   VERIFICATION_CONTRACT,
 } from "./pi-sdk-smoke-contract.mjs";
 import { killAndWaitForClose, waitFor, wakeWaiters } from "./pi-sdk-smoke-process.mjs";
@@ -20,10 +20,14 @@ const reportPath = process.argv.includes("--update-curated-report")
   : resolve(root, ".tmp/pi-sdk-smoke.json");
 const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 const packageJson = readJson(resolve(root, "package.json"));
-const sdkVersions = Object.fromEntries(Object.keys(REQUIRED_SDK_VERSIONS).map((name) => {
+const sdkVersions = Object.fromEntries(REQUIRED_SDK_PACKAGES.map((name) => {
+  const pinnedVersion = packageJson.devDependencies?.[name];
+  if (typeof pinnedVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(pinnedVersion)) {
+    throw new Error(`Pi smoke requires an exact ${name} version in package.json devDependencies; found ${pinnedVersion}`);
+  }
   const version = readJson(resolve(root, "node_modules", name, "package.json")).version;
-  if (packageJson.devDependencies?.[name] !== REQUIRED_SDK_VERSIONS[name] || version !== REQUIRED_SDK_VERSIONS[name]) {
-    throw new Error(`Pi smoke requires exact ${name}@${REQUIRED_SDK_VERSIONS[name]} dev/install pins; found ${packageJson.devDependencies?.[name]} / ${version}`);
+  if (version !== pinnedVersion) {
+    throw new Error(`Pi smoke requires installed ${name}@${pinnedVersion} to match its package.json pin; found ${version}`);
   }
   return [name, version];
 }));

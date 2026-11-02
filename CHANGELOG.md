@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [0.12.15] - 2026-11-02
+
+### Changed
+
+- Keep Pi SDK smoke checks aligned with the exact SDK versions pinned in `package.json`.
+
 ## [0.12.14] - 2026-11-02
 
 ### Changed

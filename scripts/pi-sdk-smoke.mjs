@@ -6,10 +6,10 @@ import {
   cleanShutdown,
   extensionRegistered,
   featureResponse,
+  getPinnedSdkVersions,
   handledError,
   nativeShellBoundary,
   parseJsonLines,
-  REQUIRED_SDK_VERSIONS,
   VERIFICATION_CONTRACT,
 } from "./pi-sdk-smoke-contract.mjs";
 import { killAndWaitForClose, waitFor, wakeWaiters } from "./pi-sdk-smoke-process.mjs";
@@ -20,13 +20,13 @@ const reportPath = process.argv.includes("--update-curated-report")
   : resolve(root, ".tmp/pi-sdk-smoke.json");
 const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 const packageJson = readJson(resolve(root, "package.json"));
-const sdkVersions = Object.fromEntries(Object.keys(REQUIRED_SDK_VERSIONS).map((name) => {
+const sdkVersions = getPinnedSdkVersions(packageJson);
+for (const [name, expectedVersion] of Object.entries(sdkVersions)) {
   const version = readJson(resolve(root, "node_modules", name, "package.json")).version;
-  if (packageJson.devDependencies?.[name] !== REQUIRED_SDK_VERSIONS[name] || version !== REQUIRED_SDK_VERSIONS[name]) {
-    throw new Error(`Pi smoke requires exact ${name}@${REQUIRED_SDK_VERSIONS[name]} dev/install pins; found ${packageJson.devDependencies?.[name]} / ${version}`);
+  if (version !== expectedVersion) {
+    throw new Error(`Pi smoke requires exact ${name} dev/install pins from package.json; found ${expectedVersion} / ${version}`);
   }
-  return [name, version];
-}));
+}
 
 const piPackageRoot = resolve(root, "node_modules/@earendil-works/pi-coding-agent");
 const piPackage = readJson(resolve(piPackageRoot, "package.json"));

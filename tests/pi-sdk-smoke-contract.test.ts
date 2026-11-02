@@ -5,10 +5,11 @@ import {
   cleanShutdown,
   extensionRegistered,
   featureResponse,
+  getPinnedSdkVersions,
   handledError,
   nativeShellBoundary,
   parseJsonLines,
-  REQUIRED_SDK_VERSIONS,
+  SDK_PACKAGE_NAMES,
   VERIFICATION_CONTRACT,
 } from "../scripts/pi-sdk-smoke-contract.mjs";
 
@@ -44,6 +45,10 @@ const errorMessage = {
     details: { error: "file mode requires path" },
   },
 };
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  devDependencies: Record<string, string>;
+};
+const pinnedSdkVersions = getPinnedSdkVersions(packageJson);
 const report = JSON.parse(readFileSync("docs/verification/pi-sdk-smoke.json", "utf8")) as {
   schema_version: number;
   verification_contract: string;
@@ -61,14 +66,13 @@ const report = JSON.parse(readFileSync("docs/verification/pi-sdk-smoke.json", "u
 };
 
 describe("Pi SDK behavior-v2 smoke assertions", () => {
-  it("declares the frozen SDK and behavior contract", () => {
+  it("uses exact Pi SDK versions from package.json", () => {
     assert.equal(VERIFICATION_CONTRACT, "pi-sdk-behavior-v2");
-    assert.deepEqual(REQUIRED_SDK_VERSIONS, {
-      "@earendil-works/pi-agent-core": "1.2.0",
-      "@earendil-works/pi-ai": "1.2.0",
-      "@earendil-works/pi-coding-agent": "1.2.0",
-      "@earendil-works/pi-tui": "1.2.0",
-    });
+    assert.deepEqual(Object.keys(pinnedSdkVersions), SDK_PACKAGE_NAMES);
+    for (const name of SDK_PACKAGE_NAMES) {
+      assert.equal(pinnedSdkVersions[name], packageJson.devDependencies[name]);
+    }
+    assert.throws(() => getPinnedSdkVersions({ devDependencies: {} }), /exact .* devDependency pin/);
   });
 
   it("accepts actual RPC registration and rejects missing or non-extension command records", () => {
@@ -111,11 +115,11 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   });
 
   it("requires the native shell to return the exact SDK version, not a substring", () => {
-    assert.equal(nativeShellBoundary(0, true, "1.2.0\r\n", "1.2.0").passed, true);
-    for (const output of ["", "11.2.0", "1.2.0 with warning", "1.1.0"]) {
-      assert.equal(nativeShellBoundary(0, true, output, "1.2.0").passed, false);
+    assert.equal(nativeShellBoundary(0, true, "2.3.4\r\n", "2.3.4").passed, true);
+    for (const output of ["", "12.3.4", "2.3.4 with warning", "2.3.3"]) {
+      assert.equal(nativeShellBoundary(0, true, output, "2.3.4").passed, false);
     }
-    assert.equal(nativeShellBoundary(null, false, "1.2.0", "1.2.0").passed, false);
+    assert.equal(nativeShellBoundary(null, false, "2.3.4", "2.3.4").passed, false);
   });
 
   it("parses only JSON object records and reports malformed RPC output", () => {
@@ -127,7 +131,7 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   it("keeps the committed behavior-v2 evidence complete and tied to actual command output", () => {
     assert.equal(report.schema_version, 1);
     assert.equal(report.verification_contract, VERIFICATION_CONTRACT);
-    assert.deepEqual(report.sdk_versions, REQUIRED_SDK_VERSIONS);
+    assert.deepEqual(report.sdk_versions, pinnedSdkVersions);
     assert.equal(report.unhandled_errors, 0);
     assert.equal(report.extension_load_errors, 0);
     assert.deepEqual(report.cases.map((item) => item.name), [

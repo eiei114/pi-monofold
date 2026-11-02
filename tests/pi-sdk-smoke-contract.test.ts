@@ -63,12 +63,19 @@ const report = JSON.parse(readFileSync("docs/verification/pi-sdk-smoke.json", "u
 describe("Pi SDK behavior-v2 smoke assertions", () => {
   it("declares the frozen SDK and behavior contract", () => {
     assert.equal(VERIFICATION_CONTRACT, "pi-sdk-behavior-v2");
-    assert.deepEqual(REQUIRED_SDK_VERSIONS, {
-      "@earendil-works/pi-agent-core": "1.2.0",
-      "@earendil-works/pi-ai": "1.2.0",
-      "@earendil-works/pi-coding-agent": "1.2.0",
-      "@earendil-works/pi-tui": "1.2.0",
-    });
+    const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+      devDependencies: Record<string, string>;
+    };
+    const sdkPackageNames = [
+      "@earendil-works/pi-agent-core",
+      "@earendil-works/pi-ai",
+      "@earendil-works/pi-coding-agent",
+      "@earendil-works/pi-tui",
+    ];
+    assert.deepEqual(Object.keys(REQUIRED_SDK_VERSIONS).sort(), sdkPackageNames.sort());
+    assert.deepEqual(REQUIRED_SDK_VERSIONS, Object.fromEntries(
+      sdkPackageNames.map((name) => [name, packageJson.devDependencies[name]]),
+    ));
   });
 
   it("accepts actual RPC registration and rejects missing or non-extension command records", () => {
@@ -111,11 +118,12 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   });
 
   it("requires the native shell to return the exact SDK version, not a substring", () => {
-    assert.equal(nativeShellBoundary(0, true, "1.2.0\r\n", "1.2.0").passed, true);
-    for (const output of ["", "11.2.0", "1.2.0 with warning", "1.1.0"]) {
-      assert.equal(nativeShellBoundary(0, true, output, "1.2.0").passed, false);
+    const expectedVersion = REQUIRED_SDK_VERSIONS["@earendil-works/pi-coding-agent"];
+    assert.equal(nativeShellBoundary(0, true, `${expectedVersion}\r\n`, expectedVersion).passed, true);
+    for (const output of ["", `not-${expectedVersion}`, `${expectedVersion} with warning`]) {
+      assert.equal(nativeShellBoundary(0, true, output, expectedVersion).passed, false);
     }
-    assert.equal(nativeShellBoundary(null, false, "1.2.0", "1.2.0").passed, false);
+    assert.equal(nativeShellBoundary(null, false, expectedVersion, expectedVersion).passed, false);
   });
 
   it("parses only JSON object records and reports malformed RPC output", () => {

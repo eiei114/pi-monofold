@@ -9,6 +9,7 @@ import {
   rememberUnknownPathAllow,
   resolveUnknownPathAllowsPath,
 } from "../unknown-path-allows.js";
+import { resolveAbsoluteTargetPath } from "../workspace-path-lookup.js";
 
 describe("unknown path allows", () => {
   it("persists remembered paths across reloads", async () => {
@@ -35,5 +36,19 @@ describe("unknown path allows", () => {
     assert.equal(cleared, 1);
     const stored = await loadUnknownPathAllows(root);
     assert.equal(stored.size, 0);
+  });
+
+  it("persists and reloads canonical Windows-style paths consistently across hosts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pi-monofold-allows-"));
+    const target = "C:/outside/README.md";
+    const expected = resolveAbsoluteTargetPath(process.cwd(), target);
+
+    await rememberUnknownPathAllow(root, target);
+
+    const stored = await loadUnknownPathAllows(root);
+    assert.equal(stored.has(expected), true);
+
+    const json = JSON.parse(await readFile(resolveUnknownPathAllowsPath(root), "utf8")) as { paths: string[] };
+    assert.deepEqual(json.paths, [expected]);
   });
 });

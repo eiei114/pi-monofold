@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [0.12.14] - 2026-11-02
+
+### Changed
+
+- Reuse canonical target-path resolution for workspace guards and Unknown Path allow-list checks.
+
 ## [0.12.13] - 2026-10-16
 
 ### Changed

@@ -44,6 +44,9 @@ const errorMessage = {
     details: { error: "file mode requires path" },
   },
 };
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  devDependencies: Record<string, string>;
+};
 const report = JSON.parse(readFileSync("docs/verification/pi-sdk-smoke.json", "utf8")) as {
   schema_version: number;
   verification_contract: string;
@@ -61,13 +64,13 @@ const report = JSON.parse(readFileSync("docs/verification/pi-sdk-smoke.json", "u
 };
 
 describe("Pi SDK behavior-v2 smoke assertions", () => {
-  it("declares the frozen SDK and behavior contract", () => {
+  it("derives exact SDK versions from the package manifest", () => {
     assert.equal(VERIFICATION_CONTRACT, "pi-sdk-behavior-v2");
     assert.deepEqual(REQUIRED_SDK_VERSIONS, {
-      "@earendil-works/pi-agent-core": "1.2.0",
-      "@earendil-works/pi-ai": "1.2.0",
-      "@earendil-works/pi-coding-agent": "1.2.0",
-      "@earendil-works/pi-tui": "1.2.0",
+      "@earendil-works/pi-agent-core": packageJson.devDependencies["@earendil-works/pi-agent-core"],
+      "@earendil-works/pi-ai": packageJson.devDependencies["@earendil-works/pi-ai"],
+      "@earendil-works/pi-coding-agent": packageJson.devDependencies["@earendil-works/pi-coding-agent"],
+      "@earendil-works/pi-tui": packageJson.devDependencies["@earendil-works/pi-tui"],
     });
   });
 
@@ -111,11 +114,12 @@ describe("Pi SDK behavior-v2 smoke assertions", () => {
   });
 
   it("requires the native shell to return the exact SDK version, not a substring", () => {
-    assert.equal(nativeShellBoundary(0, true, "1.2.0\r\n", "1.2.0").passed, true);
-    for (const output of ["", "11.2.0", "1.2.0 with warning", "1.1.0"]) {
-      assert.equal(nativeShellBoundary(0, true, output, "1.2.0").passed, false);
+    const expectedVersion = REQUIRED_SDK_VERSIONS["@earendil-works/pi-coding-agent"];
+    assert.equal(nativeShellBoundary(0, true, `${expectedVersion}\r\n`, expectedVersion).passed, true);
+    for (const output of ["", `not-${expectedVersion}`, `${expectedVersion} with warning`]) {
+      assert.equal(nativeShellBoundary(0, true, output, expectedVersion).passed, false);
     }
-    assert.equal(nativeShellBoundary(null, false, "1.2.0", "1.2.0").passed, false);
+    assert.equal(nativeShellBoundary(null, false, expectedVersion, expectedVersion).passed, false);
   });
 
   it("parses only JSON object records and reports malformed RPC output", () => {

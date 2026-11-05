@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## Unreleased
+
+### Changed
+
+- Move the Pi SDK development/test pins (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, `pi-tui`) to 1.5.0 together, following the `pi-extension-template` baseline, and refresh the behavior-v2 smoke evidence against the actual Pi 1.5.0 host. No source changes were required.
+
 ## [0.12.15] - 2026-11-02
 
 ### Changed

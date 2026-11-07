@@ -6,9 +6,11 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## [0.12.16] - 2026-11-07
+
 ### Changed
 
-- Move the Pi SDK development/test pins (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, `pi-tui`) to 1.5.0 together, following the `pi-extension-template` baseline, and refresh the behavior-v2 smoke evidence against the actual Pi 1.5.0 host. No source changes were required.
+- Verify `pi-monofold` against the frozen Pi SDK 1.5.0 development/test pins using actual Pi host smoke coverage. No source changes were required.
 
 ## [0.12.15] - 2026-11-02
 

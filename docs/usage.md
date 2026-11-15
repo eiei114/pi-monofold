@@ -327,7 +327,7 @@ When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards
 
 | Situation | Behavior |
 |-----------|----------|
-| Unknown path | Confirm in UI; block without UI |
+| Unknown path | Confirm in UI; block without UI only when no remembered allow matches |
 | Docs write | Requires `writeDocs` |
 | Code edit | Requires `editCode` |
 | Bash | Requires workspace cwd and `runCommands` |
@@ -335,7 +335,7 @@ When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards
 
 ### Remembered Unknown Path allows
 
-When a guarded call targets a path outside every configured workspace, Monofold asks in the UI:
+When a guarded call targets a path outside every configured workspace and no remembered allow matches, Monofold asks in the UI:
 
 ```text
 Unknown Path — <absolute path>
@@ -346,7 +346,8 @@ Unknown Path — <absolute path>
 
 - `Yes (just this once)` approves the current call only.
 - `Yes (remember across sessions)` approves the call and persists the path in `<control-repo>/.pi/monofold-unknown-path-allows.json`.
-- `No`, closing the prompt, or running without UI blocks the call.
+- `No` or closing the prompt blocks the call.
+- Running without UI blocks the call only when no remembered allow matches; a path already allowed by `Yes (remember across sessions)` proceeds without a prompt.
 - This applies to `read` / `write` / `edit` / `grep` / `find` paths and to the inferred `bash` working directory.
 - A remembered allow only bypasses the Unknown Path confirmation. It does not grant `writeDocs`, `editCode`, or `runCommands` for a configured workspace; those capability checks still run for paths inside a workspace.
 

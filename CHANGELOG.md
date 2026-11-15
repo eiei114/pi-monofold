@@ -15,6 +15,7 @@ This project follows semantic versioning.
 ### Fixed
 
 - Preserve Windows paths with a real `c` directory during MSYS path repair.
+- Qualify the Unknown Path no-UI block in `docs/usage.md` so it matches the implementation: a no-UI call is blocked only when no remembered allow matches.
 
 ## [0.12.16] - 2026-11-07
 

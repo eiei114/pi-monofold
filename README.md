@@ -187,6 +187,7 @@ pi-monofold/
 │   ├── runtime-path-overlays.test.ts
 │   ├── tsconfig-publishable-files.test.ts
 │   ├── unknown-path-allows.test.ts
+│   ├── unknown-path-guard.test.ts
 │   └── workspace-path-lookup.test.ts
 ├── CHANGELOG.md
 ├── SECURITY.md

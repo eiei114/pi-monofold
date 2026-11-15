@@ -189,6 +189,7 @@ Human-facing commands accept natural-language arguments and hand off interpretat
 | `/monofold:guide` | Interactive guide for Explore, Write, Config, Git, init, and update flows |
 | `/monofold:init` | Create or update `.pi/monofold.yaml` with an interactive wizard |
 | `/monofold:update [request]` | Migrate/clean up legacy config and optionally hand a config-change request to the agent |
+| `/monofold:clear-unknown-path-allows` | Delete remembered Unknown Path allows stored in `.pi/monofold-unknown-path-allows.json` |
 
 Fine-grained legacy commands such as `/monofold:list`, `/monofold:read`, `/monofold:search`, `/monofold:tree`, `/monofold:add`, `/monofold:project-add`, and underscore aliases are not part of the human command surface.
 
@@ -331,6 +332,41 @@ When `.pi/monofold.yaml` or legacy `.pi/monofold.yml` exists, Pi Monofold guards
 | Code edit | Requires `editCode` |
 | Bash | Requires workspace cwd and `runCommands` |
 | Git commit/push via bash | Blocked; use `/monofold:git` or `monofold_git` |
+
+### Remembered Unknown Path allows
+
+When a guarded call targets a path outside every configured workspace, Monofold asks in the UI:
+
+```text
+Unknown Path — <absolute path>
+  Yes (remember across sessions)
+  Yes (just this once)
+  No
+```
+
+- `Yes (just this once)` approves the current call only.
+- `Yes (remember across sessions)` approves the call and persists the path in `<control-repo>/.pi/monofold-unknown-path-allows.json`.
+- `No`, closing the prompt, or running without UI blocks the call.
+- This applies to `read` / `write` / `edit` / `grep` / `find` paths and to the inferred `bash` working directory.
+- A remembered allow only bypasses the Unknown Path confirmation. It does not grant `writeDocs`, `editCode`, or `runCommands` for a configured workspace; those capability checks still run for paths inside a workspace.
+
+Persisted file shape:
+
+```json
+{
+  "version": 1,
+  "paths": [
+    "C:/Users/Keisu/Projects/OSS/notes/README.md"
+  ]
+}
+```
+
+- `version` must be `1` and `paths` must be an array of strings.
+- Entries are stored as absolute normalized paths, deduplicated and sorted on every save. Use the canonical form the guard resolves (for example `C:/Users/...` on Windows, not `/c/Users/...`).
+- A malformed file (wrong `version` or non-string entries) fails the guard check instead of silently granting access; delete the file to recover.
+- The file is repo-local control state next to your config. Deleting it is safe; the next `Yes (remember across sessions)` recreates it.
+
+Revoke remembered allows with `/monofold:clear-unknown-path-allows`, which deletes the file and reports how many allows were cleared (or that none were found). Deleting `.pi/monofold-unknown-path-allows.json` yourself has the same effect.
 
 ### Windows paths
 

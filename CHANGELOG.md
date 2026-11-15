@@ -6,6 +6,10 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- Preserve Windows paths with a real `c` directory during MSYS path repair.
+
 ## [0.12.16] - 2026-11-07
 
 ### Changed

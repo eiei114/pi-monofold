@@ -9,9 +9,9 @@ function repairMsysPath(value: string): string {
     normalized = `${unixDrive[1].toUpperCase()}:/${unixDrive[2]}`;
   }
 
-  const mixedDrive = normalized.match(/^([a-zA-Z]):\/?(?:c|C)\/(.*)$/);
-  if (mixedDrive) {
-    normalized = `${mixedDrive[1].toUpperCase()}:/${mixedDrive[2]}`;
+  const mixedDrive = normalized.match(/^([a-zA-Z]):\/?([a-zA-Z])\/(.*)$/);
+  if (mixedDrive && mixedDrive[1].toLowerCase() === mixedDrive[2].toLowerCase()) {
+    normalized = `${mixedDrive[1].toUpperCase()}:/${mixedDrive[3]}`;
   }
 
   return normalized;

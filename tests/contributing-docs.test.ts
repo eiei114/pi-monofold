@@ -46,3 +46,49 @@ describe("CONTRIBUTING docs match release flow", () => {
     );
   });
 });
+
+describe("docs/usage.md matches the Unknown Path allow contract", () => {
+  const usage = readFileSync("docs/usage.md", "utf8");
+  const index = readFileSync("index.ts", "utf8");
+  const allows = readFileSync("unknown-path-allows.ts", "utf8");
+
+  it("lists the clear command in the commands table", () => {
+    assert.match(
+      usage,
+      /^\| `\/monofold:clear-unknown-path-allows` \|/m,
+      "docs/usage.md should list /monofold:clear-unknown-path-allows in the commands table",
+    );
+  });
+
+  it("registers the documented command name in index.ts", () => {
+    assert.match(index, /registerCommand\("monofold:clear-unknown-path-allows"/);
+    assert.match(usage, /\/monofold:clear-unknown-path-allows/);
+  });
+
+  it("documents the persisted file path and shape used by the implementation", () => {
+    assert.match(allows, /path\.join\("\.pi", "monofold-unknown-path-allows\.json"\)/);
+    assert.match(usage, /\.pi\/monofold-unknown-path-allows\.json/);
+    assert.match(allows, /version: 1;/);
+    assert.match(usage, /"version": 1/);
+    assert.match(usage, /"paths": \[/);
+  });
+
+  it("documents every confirmation choice offered by the guard", () => {
+    for (const choice of [
+      "Yes (remember across sessions)",
+      "Yes (just this once)",
+      "No",
+    ]) {
+      assert.equal(
+        index.includes(`"${choice}"`),
+        true,
+        `index.ts should still offer ${choice}`,
+      );
+      assert.equal(
+        usage.includes(choice),
+        true,
+        `docs/usage.md should document ${choice}`,
+      );
+    }
+  });
+});

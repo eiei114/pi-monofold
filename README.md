@@ -25,7 +25,7 @@ See [docs/usage.md](./docs/usage.md) for configuration, commands, agent tools, a
 - **Multi-runtime path overlays** — keep one logical workspace definition while swapping absolute repo roots per runtime
 - **Routed Markdown writes** — route PRDs, progress notes, and other doc types to configured folders
 - **Workspace-aware reads** — list, read, search, and tree views scoped to readable workspaces, with bounded previews by default
-- **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags
+- **Capability guard** — block or confirm `read` / `write` / `edit` / `grep` / `find` / `bash` based on workspace tags; Unknown Path approvals can be remembered across sessions and revoked with `/monofold:clear-unknown-path-allows`
 - **Focus presets** — tag-based focus targets for the control workspace
 - **Natural-language commands** — `/monofold:explore`, `/monofold:write`, `/monofold:config`, `/monofold:git`, and more
 - **Strict agent tools** — `monofold_*` tools for programmatic access behind the command surface
@@ -52,7 +52,7 @@ pi install -l git:github.com/eiei114/pi-monofold
 Pin a version:
 
 ```powershell
-pi install git:github.com/eiei114/pi-monofold@v0.12.16
+pi install git:github.com/eiei114/pi-monofold@v0.12.17
 ```
 
 Try without installing:
@@ -76,7 +76,7 @@ pi install -l npm:pi-monofold
 Pin a version:
 
 ```powershell
-pi install npm:pi-monofold@0.12.16
+pi install npm:pi-monofold@0.12.17
 ```
 
 Try without installing:
@@ -187,6 +187,7 @@ pi-monofold/
 │   ├── runtime-path-overlays.test.ts
 │   ├── tsconfig-publishable-files.test.ts
 │   ├── unknown-path-allows.test.ts
+│   ├── unknown-path-guard.test.ts
 │   └── workspace-path-lookup.test.ts
 ├── CHANGELOG.md
 ├── SECURITY.md

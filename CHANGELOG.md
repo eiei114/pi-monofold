@@ -6,9 +6,16 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## [0.12.17] - 2026-11-15
+
+### Added
+
+- Documented remembered Unknown Path allows in `docs/usage.md`: the three confirmation choices, the `.pi/monofold-unknown-path-allows.json` file location and shape, absolute normalized path entries, and how to revoke them with `/monofold:clear-unknown-path-allows`.
+
 ### Fixed
 
 - Preserve Windows paths with a real `c` directory during MSYS path repair.
+- Qualify the Unknown Path no-UI block in `docs/usage.md` so it matches the implementation: a no-UI call is blocked only when no remembered allow matches.
 
 ## [0.12.16] - 2026-11-07
 

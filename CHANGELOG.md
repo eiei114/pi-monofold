@@ -6,6 +6,12 @@ This project follows semantic versioning.
 
 ## Unreleased
 
+## [0.12.18] - 2026-11-17
+
+### Changed
+
+- Verify `pi-monofold` against the Pi SDK 1.5.2 development/test pins using actual Pi host smoke coverage. No source changes were required.
+
 ## [0.12.17] - 2026-11-15
 
 ### Added

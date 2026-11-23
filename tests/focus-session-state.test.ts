@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -58,4 +58,29 @@ describe("focus session state", () => {
       assert.match(loaded.error, /JSON|Unexpected token/i);
     }
   });
+
+  for (const { label, state, diagnostic } of [
+    {
+      label: "an unsupported schema version",
+      state: { version: 2, activeFocusPresetId: "docs" },
+      diagnostic: /requires version: 1/,
+    },
+    {
+      label: "a blank active focus preset id",
+      state: { version: 1, activeFocusPresetId: " \t " },
+      diagnostic: /activeFocusPresetId must be non-empty/,
+    },
+  ]) {
+    it(`returns malformed for ${label}`, async (t) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "pi-monofold-focus-session-"));
+      t.after(() => rm(root, { recursive: true, force: true }));
+      const filePath = resolveFocusSessionStatePath(root);
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, JSON.stringify(state), "utf8");
+
+      const loaded = await loadFocusSessionState(root);
+      assert.equal(loaded.kind, "malformed");
+      assert.match(loaded.error, diagnostic);
+    });
+  }
 });

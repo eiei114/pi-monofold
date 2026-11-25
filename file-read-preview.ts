@@ -66,7 +66,11 @@ function truncateChars(text: string, maxChars: number): { text: string; truncate
   if (text.length <= maxChars) {
     return { text, truncated: false };
   }
-  return { text: text.slice(0, maxChars), truncated: true };
+  const before = text.charCodeAt(maxChars - 1);
+  const after = text.charCodeAt(maxChars);
+  // Keep the UTF-16 budget, but never cut between a high and low surrogate.
+  const splitsPair = before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+  return { text: text.slice(0, splitsPair ? maxChars - 1 : maxChars), truncated: true };
 }
 
 export function truncationHint(details: FileReadDetails): string {

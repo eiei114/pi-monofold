@@ -60,6 +60,30 @@ describe("buildFileReadResponse", () => {
     assert.doesNotMatch(result.text, /efgh/);
   });
 
+  it("backs off when an emoji straddles maxChars", () => {
+    const result = buildFileReadResponse("a😀b", { maxChars: 2 }, stat, { relativePath: "emoji.txt" });
+
+    assert.equal(result.details.truncated, true);
+    assert.equal(result.details.previewCharacterCount, 1);
+    assert.match(result.text, /\n--- preview ---\na\n\n\[truncated\]/);
+  });
+
+  it("keeps an emoji that fits exactly at the truncation boundary", () => {
+    const result = buildFileReadResponse("a😀b", { maxChars: 3 }, stat, { relativePath: "emoji.txt" });
+
+    assert.equal(result.details.truncated, true);
+    assert.equal(result.details.previewCharacterCount, 3);
+    assert.match(result.text, /\n--- preview ---\na😀\n\n\[truncated\]/);
+  });
+
+  it("does not report truncation when content ending in an emoji fits exactly", () => {
+    const result = buildFileReadResponse("a😀", { maxChars: 3 }, stat, { relativePath: "emoji.txt" });
+
+    assert.equal(result.details.truncated, false);
+    assert.equal(result.details.previewCharacterCount, 3);
+    assert.ok(result.text.endsWith("\n--- preview ---\na😀"));
+  });
+
   it("honors head and tail opt-in", () => {
     const content = "a\nb\nc\nd\ne\n";
     const result = buildFileReadResponse(content, { head: 2, tail: 2 }, stat, {

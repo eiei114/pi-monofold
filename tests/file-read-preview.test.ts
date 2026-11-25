@@ -97,4 +97,43 @@ describe("buildFileReadResponse", () => {
     assert.match(result.text, /\ne/);
     assert.doesNotMatch(result.text, /\nc\n/);
   });
+
+  it("excludes the omission marker from the displayed source line count", () => {
+    const preview = "a\n... [1 line omitted] ...\nc";
+    const result = buildFileReadResponse("a\nb\nc", { head: 1, tail: 1 }, stat, { relativePath: "three.txt" });
+
+    assert.equal(result.details.truncated, true);
+    assert.equal(result.details.previewLineCount, 2);
+    assert.equal(result.details.previewCharacterCount, preview.length);
+    assert.ok(result.text.includes(`\n--- preview ---\n${preview}\n\n[truncated] Showing 2 of 3 lines`));
+  });
+
+  it("does not count clipped marker text or a separator before unseen tail text", () => {
+    const content = "a\nb\ncat";
+    for (const [preview, count] of [
+      ["a", 1],
+      ["a\n... [1", 1],
+      ["a\n... [1 line omitted] ...\n", 1],
+      ["a\n... [1 line omitted] ...\nc", 2],
+    ] as const) {
+      const result = buildFileReadResponse(content, { head: 1, tail: 1, maxChars: preview.length }, stat, {
+        relativePath: "capped.txt",
+      });
+
+      assert.equal(result.details.truncated, true);
+      assert.equal(result.details.previewLineCount, count, JSON.stringify(preview));
+      assert.equal(result.details.previewCharacterCount, preview.length);
+      assert.ok(result.text.includes(`\n--- preview ---\n${preview}\n\n[truncated] Showing ${count} of 3 lines`));
+    }
+  });
+
+  it("counts every source line when head and tail cover the full file", () => {
+    const content = "a\n... [1 line omitted] ...\nc";
+    const result = buildFileReadResponse(content, { head: 2, tail: 2 }, stat, { relativePath: "full.txt" });
+
+    assert.equal(result.details.truncated, false);
+    assert.equal(result.details.previewLineCount, 3);
+    assert.equal(result.details.previewCharacterCount, content.length);
+    assert.ok(result.text.endsWith(`\n--- preview ---\n${content}`));
+  });
 });

@@ -86,29 +86,32 @@ export function truncationHint(details: FileReadDetails): string {
   return parts.join(" ");
 }
 
-function buildHeadTailPreview(lines: string[], head: number | undefined, tail: number | undefined): string {
+function buildHeadTailPreview(
+  lines: string[],
+  head: number | undefined,
+  tail: number | undefined,
+): { text: string; omissionLineIndex?: number } {
   const headCount = head ?? 0;
   const tailCount = tail ?? 0;
   if (headCount > 0 && tailCount > 0) {
     const headLines = takeHeadLines(lines, headCount);
     const tailLines = takeTailLines(lines, tailCount);
     if (headCount + tailCount >= lines.length) {
-      return lines.join("\n");
+      return { text: lines.join("\n") };
     }
     const omitted = lines.length - headLines.length - tailLines.length;
-    return [
-      ...headLines,
-      `... [${omitted} line${omitted === 1 ? "" : "s"} omitted] ...`,
-      ...tailLines,
-    ].join("\n");
+    return {
+      text: [...headLines, `... [${omitted} line${omitted === 1 ? "" : "s"} omitted] ...`, ...tailLines].join("\n"),
+      omissionLineIndex: headLines.length,
+    };
   }
   if (headCount > 0) {
-    return takeHeadLines(lines, headCount).join("\n");
+    return { text: takeHeadLines(lines, headCount).join("\n") };
   }
   if (tailCount > 0) {
-    return takeTailLines(lines, tailCount).join("\n");
+    return { text: takeTailLines(lines, tailCount).join("\n") };
   }
-  return takeHeadLines(lines, DEFAULT_PREVIEW_LINES).join("\n");
+  return { text: takeHeadLines(lines, DEFAULT_PREVIEW_LINES).join("\n") };
 }
 
 function resolveExplicitLimits(options: FileReadOptions): {
@@ -148,9 +151,9 @@ export function buildFileReadResponse(
   } else if (limits.head !== undefined || limits.tail !== undefined) {
     const headCount = limits.head ?? 0;
     const tailCount = limits.tail ?? 0;
-    previewText = buildHeadTailPreview(lines, limits.head, limits.tail);
+    const preview = buildHeadTailPreview(lines, limits.head, limits.tail);
     const maxChars = limits.maxChars ?? Number.POSITIVE_INFINITY;
-    const charResult = truncateChars(previewText, maxChars);
+    const charResult = truncateChars(preview.text, maxChars);
     previewText = charResult.text;
     const linesFullyShown =
       headCount + tailCount >= lineCount ||
@@ -158,6 +161,15 @@ export function buildFileReadResponse(
       (tailCount > 0 && headCount === 0 && tailCount >= lineCount);
     truncated = charResult.truncated || !linesFullyShown;
     previewLineCount = previewText === "" ? 0 : previewText.split("\n").length;
+    if (preview.omissionLineIndex !== undefined) {
+      // A clipped separator does not show the next nonempty source line.
+      if (charResult.truncated && previewText.endsWith("\n") && preview.text[previewText.length] !== "\n") {
+        previewLineCount--;
+      }
+      if (previewLineCount > preview.omissionLineIndex) {
+        previewLineCount--;
+      }
+    }
     previewCharacterCount = previewText.length;
   } else if (limits.maxChars !== undefined) {
     const charResult = truncateChars(content, limits.maxChars);

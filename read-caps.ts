@@ -80,7 +80,7 @@ export function capSearchOutput(rawOutput: string, caps: ResolvedSearchCaps): Se
     };
   }
 
-  const lines = trimmed.split("\n");
+  const lines = trimmed.split(/\r?\n/);
   const matchCount = lines.length;
   const matchLimited = lines.slice(0, caps.maxMatches);
   let truncated = matchLimited.length < matchCount;

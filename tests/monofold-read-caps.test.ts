@@ -38,6 +38,7 @@ describe("capSearchOutput", () => {
     const result = capSearchOutput("", resolveSearchCaps());
     assert.equal(result.text, "No matches");
     assert.equal(result.matchCount, 0);
+    assert.equal(result.returnedMatchCount, 0);
     assert.equal(result.truncated, false);
   });
 
@@ -48,6 +49,20 @@ describe("capSearchOutput", () => {
     assert.equal(result.matchCount, 2);
     assert.equal(result.returnedMatchCount, 2);
     assert.equal(result.truncated, false);
+  });
+
+  it("fits the same two LF and CRLF matches at the exact character cap", () => {
+    const lines = ["src/a.ts:1:foo", "src/b.ts:2:bar"];
+    const text = lines.join("\n");
+    const caps = resolveSearchCaps({ maxMatches: 2, maxChars: text.length });
+    const lf = capSearchOutput(`${text}\n`, caps);
+    const crlf = capSearchOutput(`${lines.join("\r\n")}\r\n`, caps);
+
+    assert.equal(lf.text, text);
+    assert.equal(lf.matchCount, 2);
+    assert.equal(lf.returnedMatchCount, 2);
+    assert.equal(lf.truncated, false);
+    assert.deepEqual(crlf, lf);
   });
 
   it("truncates by maxMatches and appends hint", () => {

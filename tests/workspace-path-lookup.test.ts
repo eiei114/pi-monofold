@@ -141,6 +141,27 @@ describe("workspace path lookup", () => {
     assert.equal(resolved.workspace, undefined);
   });
 
+  it("matches a nested UNC target on the configured share", () => {
+    const workspace = { id: "unc-root", resolvedPath: String.raw`\\fixture-server\workspace` };
+    const resolved = resolveWorkspaceTargetPath(
+      buildPathLookupWorkspaces([workspace]),
+      "/control",
+      String.raw`\\fixture-server\WORKSPACE\docs\draft\..\note.md`,
+    );
+    assert.equal(resolved.absolutePath, String.raw`\\fixture-server\WORKSPACE\docs\note.md`);
+    assert.equal(resolved.workspace, workspace);
+  });
+
+  it("does not match a UNC target on a different share of the same server", () => {
+    const resolved = resolveWorkspaceTargetPath(
+      buildPathLookupWorkspaces([{ id: "unc-root", resolvedPath: String.raw`\\fixture-server\workspace` }]),
+      "/control",
+      String.raw`\\fixture-server\workspace-other\docs\note.md`,
+    );
+    assert.equal(resolved.absolutePath, String.raw`\\fixture-server\workspace-other\docs\note.md`);
+    assert.equal(resolved.workspace, undefined);
+  });
+
   it("reuses pre-sorted lookup order across repeated guard checks", () => {
     const workspaces: LookupWorkspace[] = Array.from({ length: 200 }, (_, index) => ({
       id: `ws-${index}`,

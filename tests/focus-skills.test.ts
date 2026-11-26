@@ -90,6 +90,18 @@ describe("applyFocusSkillsToSystemPrompt", () => {
     assert.match(result, /^base/);
   });
 
+  it("renders surviving skills in declaration order and preserves unrelated prompt text", () => {
+    const before = "Base instructions";
+    const after = "\n\nProject instructions";
+    const prompt = `${before}${skillsBlock}${after}`;
+    // Inventory lists commit before review; the preset declares the reverse.
+    const result = applyFocusSkillsToSystemPrompt(prompt, sampleSkills, ["review", "missing", "commit"]);
+
+    const renderedNames = Array.from(result.matchAll(/<name>([^<]+)<\/name>/g), (match) => match[1]);
+    assert.deepEqual(renderedNames, ["review", "commit"]);
+    assert.equal(stripSkillsSectionFromSystemPrompt(result), `${before}${after}`);
+  });
+
   it("removes skills entirely for an explicit empty list", () => {
     const prompt = `base${skillsBlock}`;
     const result = applyFocusSkillsToSystemPrompt(prompt, sampleSkills, []);

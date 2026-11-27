@@ -1,18 +1,26 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import piMonofold from "../index.js";
 
 type ToolEntry = { execute: (...args: any[]) => Promise<any> };
 
-const ORIGINAL_RUNTIME = process.env.PI_MONOFOLD_RUNTIME;
+const runtimeEnvKeys = ["PI_MONOFOLD_RUNTIME", "MONOFOLD_RUNTIME"] as const;
+let originalRuntimeEnv: (string | undefined)[];
+
+beforeEach(() => {
+  originalRuntimeEnv = runtimeEnvKeys.map((key) => process.env[key]);
+});
 
 afterEach(() => {
-  if (ORIGINAL_RUNTIME === undefined) delete process.env.PI_MONOFOLD_RUNTIME;
-  else process.env.PI_MONOFOLD_RUNTIME = ORIGINAL_RUNTIME;
+  runtimeEnvKeys.forEach((key, index) => {
+    const value = originalRuntimeEnv[index];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
 });
 
 function loadExtension() {
@@ -62,6 +70,46 @@ function manifestRuntimePathRegex(absolutePath: string, source: "overlay" | "bas
 }
 
 describe("runtime path overlays", () => {
+  for (const { title, primary, expectedRuntime } of [
+    { title: "uses MONOFOLD_RUNTIME when PI_MONOFOLD_RUNTIME is unset", primary: undefined, expectedRuntime: "alias-runtime" },
+    { title: "prefers PI_MONOFOLD_RUNTIME when both variables are set", primary: " Primary Runtime ", expectedRuntime: "primary-runtime" },
+  ]) {
+    it(title, async (t) => {
+      if (primary === undefined) delete process.env.PI_MONOFOLD_RUNTIME;
+      else process.env.PI_MONOFOLD_RUNTIME = primary;
+      process.env.MONOFOLD_RUNTIME = " Alias Runtime ";
+
+      const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-runtime-env-"));
+      t.after(() => rm(root, { recursive: true, force: true }));
+      const baseRoot = path.join(root, "base");
+      const primaryRoot = path.join(root, "primary-overlay");
+      const aliasRoot = path.join(root, "alias-overlay");
+      for (const dir of [baseRoot, primaryRoot, aliasRoot]) await mkdir(dir);
+      await writeConfig(
+        root,
+        `version: 1
+workspaces:
+  - name: Runtime Env Fixture
+    path: ./base
+    pathOverlays:
+      primary-runtime: ${JSON.stringify(primaryRoot.replace(/\\/g, "/"))}
+      alias-runtime: ${JSON.stringify(aliasRoot.replace(/\\/g, "/"))}
+    tags: [runtime-fixture]
+    capabilities: [read]
+`,
+      );
+
+      const list = loadExtension().tools.get("monofold_list");
+      assert.ok(list);
+      const result = await list.execute("1", {}, undefined, undefined, ctx(root));
+      const expectedRoot = expectedRuntime === "alias-runtime" ? aliasRoot : primaryRoot;
+      assert.equal(result.details.workspaces.length, 1);
+      assert.equal(path.normalize(result.details.workspaces[0].runtimeResolvedPath), expectedRoot);
+      assert.equal(result.details.workspaces[0].runtimePathSource, "overlay");
+      assert.ok(result.content[0]!.text.split("\n").includes(`Active runtime: ${expectedRuntime} [env]`));
+    });
+  }
+
   it("uses the active runtime overlay for list, read, write, and git", async () => {
     process.env.PI_MONOFOLD_RUNTIME = "mac-eiei114";
     const root = await mkdtemp(path.join(tmpdir(), "pi-monofold-overlay-"));

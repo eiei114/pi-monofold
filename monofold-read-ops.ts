@@ -45,14 +45,11 @@ export async function shallowTree(
   budget?: ShallowTreeBudget,
 ): Promise<string[]> {
   if (depth < 0) return [];
-  if (budget && budget.remaining <= 0) {
-    budget.truncated = true;
-    return [];
-  }
   const entries = await readdir(path.join(root, prefix), { withFileTypes: true });
   const lines: string[] = [];
   for (const entry of entries) {
     if (entry.name === ".git" || entry.name === "node_modules") continue;
+    // An exhausted budget is only truncation if this eligible entry cannot fit.
     if (budget && budget.remaining <= 0) {
       budget.truncated = true;
       break;

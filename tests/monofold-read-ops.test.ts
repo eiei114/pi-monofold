@@ -39,6 +39,38 @@ describe("readMonofoldFile", () => {
 });
 
 describe("buildMonofoldTree", () => {
+  it("reports an exact-fit directory as truncated only when an eligible child is omitted", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "monofold-read-ops-tree-"));
+    try {
+      const childDir = path.join(dir, "src");
+      const caps = { maxEntries: 1 };
+      await mkdir(childDir);
+
+      const empty = await buildMonofoldTree(dir, 1, caps);
+      assert.equal(empty.truncated, false);
+      assert.equal(empty.text, "src/");
+
+      await mkdir(path.join(childDir, ".git"));
+      await mkdir(path.join(childDir, "node_modules"));
+      const excludedOnly = await buildMonofoldTree(dir, 1, caps);
+      assert.equal(excludedOnly.truncated, false);
+      assert.equal(excludedOnly.text, "src/");
+
+      await writeFile(path.join(childDir, "index.ts"), "", "utf8");
+      const omitted = await buildMonofoldTree(dir, 1, caps);
+      assert.equal(omitted.truncated, true);
+      assert.equal(omitted.returnedEntryCount, 1);
+      assert.match(omitted.text, /^src\/\n\n\[truncated: showing/);
+      assert.doesNotMatch(omitted.text, /index\.ts/);
+
+      const depthLimited = await buildMonofoldTree(dir, 0, caps);
+      assert.equal(depthLimited.truncated, false);
+      assert.equal(depthLimited.text, "src/");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("caps tree output at the default entry limit", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "monofold-read-ops-tree-"));
     try {
